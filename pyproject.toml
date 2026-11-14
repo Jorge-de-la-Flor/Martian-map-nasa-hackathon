@@ -1,7 +1,7 @@
 [project]
 name = "martian-map-nasa-hackathon"
 version = "0.1.0"
-description = "Add your description here"
+description = "Mars exploration and terrain-aware route planning."
 readme = "README.md"
 authors = [
     { name = "FrostCore", email = "159102314+Jorge-de-la-Flor@users.noreply.github.com" }
@@ -31,3 +31,10 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.17.5",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.uv]
+package = false
