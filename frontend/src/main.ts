@@ -80,6 +80,7 @@ app.innerHTML = `
           <div class="field"><label for="end-lat">DEST. LATITUDE</label><input id="end-lat" type="number" step="any" value="-4.7" /></div>
         </div>
         <button id="plan-button" class="primary-button">REQUEST ROUTE ANALYSIS</button>
+                <button id="traverse-button" class="primary-button secondary-button" disabled>▶ START TRAVERSE</button>
         <div id="plan-result" class="result" role="status">
           <p class="eyebrow">PLANNER STATUS</p><p>Awaiting mission parameters.</p>
         </div>
@@ -265,6 +266,7 @@ function selectMission(mission: Mission): void {
   targetEntity.show = true;
   targetCartesian = Cartesian3.fromDegrees(longitude, latitude);
   updatePreview();
+    
   const oldRoute = viewer.entities.getById("planned-route");
   if (oldRoute) oldRoute.show = false;
   if (!targetCartesian) return;
@@ -273,6 +275,7 @@ function selectMission(mission: Mission): void {
     new BoundingSphere(Cartesian3.fromDegrees(longitude, latitude, GALE_SURFACE_HEIGHT_M), 1500),
     { offset: new HeadingPitchRange(0, CesiumMath.toRadians(-35), 9000), duration: 2.5 }
   );
+    prepareTraverse(route, oneWayH);
 }
 
 // selector de misiones
@@ -354,6 +357,7 @@ const previewLine = viewer.entities.add({
 });
 
 function updatePreview(): void {
+  document.querySelector<HTMLButtonElement>("#traverse-button")!.disabled = true;
   if (!targetCartesian) return;
   previewLine.polyline!.positions = new ConstantProperty([astronautCartesian, targetCartesian]);
   previewLine.show = true;
@@ -390,6 +394,8 @@ setResult("Select a mission, then click on the terrain to place the astronaut.",
 // Clic en el terreno → mover al astronauta ahí
 const clickHandler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 clickHandler.setInputAction((click: ScreenSpaceEventHandler.PositionedEvent) => {
+  if (animating) return;
+
   if (!viewer.scene.pickPositionSupported) return;
   const picked = viewer.scene.pickPosition(click.position);
   if (picked) placeAstronaut(picked);
@@ -473,7 +479,128 @@ function drawRoute(route: Coordinate[], isDemo: boolean): void {
     offset: new HeadingPitchRange(0, CesiumMath.toRadians(-50), sphere.radius * 3),
     duration: 2,
   });
+  
+  prepareTraverse(route, oneWayH);
 }
+
+
+
+
+// ---------- Animación del recorrido ----------
+const ANIMATION_SECONDS = 15; // duración real de la animación (el tiempo de misión se simula)
+const traverseButton = document.querySelector<HTMLButtonElement>("#traverse-button")!;
+
+let animating = false;
+let traverse: { positions: Cartesian3[]; cumulative: number[]; totalM: number; oneWayH: number } | null = null;
+
+// Guarda la ruta y la distancia acumulada en cada punto
+function prepareTraverse(route: Coordinate[], oneWayH: number): void {
+  const positions = route.map((p) => Cartesian3.fromDegrees(p.longitude, p.latitude));
+  const cumulative = [0];
+  for (let i = 1; i < route.length; i++) {
+    const segment = new EllipsoidGeodesic(
+      Cartographic.fromDegrees(route[i - 1].longitude, route[i - 1].latitude),
+      Cartographic.fromDegrees(route[i].longitude, route[i].latitude),
+      Ellipsoid.MARS
+    ).surfaceDistance;
+    cumulative.push(cumulative[i - 1] + segment);
+  }
+  traverse = { positions, cumulative, totalM: cumulative[cumulative.length - 1], oneWayH };
+  traverseButton.disabled = false;
+}
+
+// Punto de la ruta a cierta distancia desde el inicio
+function positionAtDistance(d: number): Cartesian3 {
+  const { positions, cumulative } = traverse!;
+  let i = 1;
+  while (i < cumulative.length - 1 && cumulative[i] < d) i++;
+  const segmentLength = cumulative[i] - cumulative[i - 1] || 1;
+  const t = Math.min(Math.max((d - cumulative[i - 1]) / segmentLength, 0), 1);
+  return Cartesian3.lerp(positions[i - 1], positions[i], t, new Cartesian3());
+}
+
+function startTraverse(): void {
+  if (!traverse || animating) return;
+  const { totalM, oneWayH } = traverse;
+  const limit = currentMission?.evaMaxHours;
+
+  // Punto de no retorno: con la mitad del oxígeno hay que volver a la base
+  const turnaroundH = limit !== undefined ? limit / 2 : Infinity;
+  const stopFraction = Math.min(1, turnaroundH / oneWayH);
+  const mustTurnBack = stopFraction < 1;
+
+  animating = true;
+  traverseButton.disabled = true;
+  planButton.disabled = true;
+
+  const astronautPosition = new ConstantPositionProperty(traverse.positions[0]);
+  astronautEntity.position = astronautPosition;
+
+  const startTime = performance.now();
+  const durationMs = ANIMATION_SECONDS * 1000 * stopFraction;
+
+  function frame(now: number): void {
+    const progress = Math.min((now - startTime) / durationMs, 1) * stopFraction;
+    const point = positionAtDistance(progress * totalM);
+    astronautPosition.setValue(point);
+
+    const elapsedH = progress * oneWayH;
+    const oxygen = limit !== undefined ? ` · O₂ left ${(limit - elapsedH).toFixed(1)} h` : "";
+    setResult(
+      `TRAVERSING · ${((progress * totalM) / 1000).toFixed(2)} / ${(totalM / 1000).toFixed(2)} km` +
+        ` · elapsed ${elapsedH.toFixed(1)} h${oxygen}`,
+      "info"
+    );
+
+    if (progress < stopFraction) {
+      requestAnimationFrame(frame);
+    } else {
+      finishTraverse(point, mustTurnBack, elapsedH);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function finishTraverse(point: Cartesian3, turnedBack: boolean, elapsedH: number): void {
+  animating = false;
+  planButton.disabled = false;
+
+  // El astronauta queda donde terminó
+  astronautCartesian = point;
+  const carto = Cartographic.fromCartesian(point);
+  startLonInput.value = CesiumMath.toDegrees(carto.longitude).toFixed(5);
+  startLatInput.value = CesiumMath.toDegrees(carto.latitude).toFixed(5);
+
+  if (turnedBack) {
+    setResult(
+      `⚠ TURNAROUND POINT · After ${elapsedH.toFixed(1)} h the astronaut must head back to keep ` +
+        `enough oxygen for the return. Target not reached: choose a closer start or use rover support.`,
+      "error"
+    );
+  } else {
+    setResult(
+      `✅ MISSION TARGET REACHED · ${currentMission?.name ?? "Target"} · ` +
+        `${elapsedH.toFixed(1)} h of walking. Ready to start the science work.`,
+      "info"
+    );
+  }
+}
+
+traverseButton.addEventListener("click", startTraverse);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

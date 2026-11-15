@@ -54,3 +54,6 @@ footer { height: 34px; flex: 0 0 34px; display: flex; justify-content: space-bet
   .topbar { height: 68px; flex-basis: 68px; }
   footer { gap: 12px; font-size: 7px; }
 }
+
+.secondary-button { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.secondary-button:disabled { opacity: .35; cursor: not-allowed; }
