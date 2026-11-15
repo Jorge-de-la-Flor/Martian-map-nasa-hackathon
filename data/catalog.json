@@ -1,0 +1,56 @@
+
+{
+  "_comment": "He dejado region como null por una razón: Gale y Jezero siguen siendo candidatas, y no quiero convertir una selección pendiente en una decisión que el equipo nunca tomó.",
+  "schema_version": 1,
+  "region": null,
+  "layers": [
+    {
+      "id": "ctx_stereo_dtm",
+      "name": "CTX Stereo Digital Terrain Model",
+      "category": "topographic",
+      "mission": "Mars Reconnaissance Orbiter",
+      "instrument": "CTX",
+      "source_url": "https://stac.astrogeology.usgs.gov/docs/data/mars/ctxdtms/",
+      "role": "route_dem",
+      "resolution_m": 20.0,
+      "local_path": null,
+      "notes": "Local stereo terrain model. Coverage must be verified for the selected study area."
+    },
+    {
+      "id": "mola_megdr",
+      "name": "MOLA Mission Experiment Gridded Data Record",
+      "category": "topographic",
+      "mission": "Mars Global Surveyor",
+      "instrument": "MOLA",
+      "source_url": "https://pds-geosciences.wustl.edu/missions/mgs/megdr.html",
+      "role": "regional_context",
+      "resolution_m": 463.0,
+      "local_path": null,
+      "notes": "Global regional elevation context. Not suitable by itself for detailed human foot-placement planning."
+    },
+    {
+      "id": "ctx_optical_mosaic",
+      "name": "CTX Global Mosaic",
+      "category": "optical",
+      "mission": "Mars Reconnaissance Orbiter",
+      "instrument": "CTX",
+      "source_url": "https://murray-lab.caltech.edu/CTX/",
+      "role": "visual_context",
+      "resolution_m": 5.0,
+      "local_path": null,
+      "notes": "Optical imagery. It is not a digital elevation model."
+    },
+    {
+      "id": "themis_ir",
+      "name": "THEMIS Controlled Infrared Mosaic",
+      "category": "thermal",
+      "mission": "Mars Odyssey",
+      "instrument": "THEMIS",
+      "source_url": "https://registry.opendata.aws/nasa-usgs-themis-mosaics/",
+      "role": "thermal_context",
+      "resolution_m": 100.0,
+      "local_path": null,
+      "notes": "Infrared mosaic. Product type, band, units, and processing level must be checked before quantitative interpretation."
+    }
+  ]
+}

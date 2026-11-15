@@ -13,3 +13,15 @@ dist/
 *.tif
 *.tiff
 *.vrt
+
+# Local planetary raster products and generated datasets
+data/**/*.tif
+data/**/*.tiff
+data/**/*.img
+data/**/*.vrt
+data/**/*.aux.xml
+data/**/*.ovr
+
+# Preserve scientific catalog and documentation
+!data/catalog.json
+!data/README.md
