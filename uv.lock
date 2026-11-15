@@ -393,7 +393,7 @@ wheels = [
 [[package]]
 name = "martian-map-nasa-hackathon"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
