@@ -40,4 +40,35 @@ data, so check which elevation product contributed to the corridor before using 
 to judge small ridges or surface obstacles. The waypoint samples are DEM values
 at the rover positions and should be interpreted at that scale.
 
-Codex assisted with source research, scripting, and documentation for this data preparation.
+## Build the slope layer and reference profile
+
+With the DEM available locally, run:
+
+```bash
+uv run python scripts/build_boxwork_layers.py
+```
+
+The generated files under `data/boxwork/` stay local:
+
+- `slope.tif` stores the slope in degrees on the original projected grid. Central
+  differences use neighboring elevations and adjust east-west distances for
+  latitude. Boundary cells and cells without the necessary neighbors are NoData.
+- `slope.png` renders the same estimates with a discrete legend and transparent
+  NoData cells. The legend groups angles for display.
+- `analysis.json` provides the PNG bounds in east-positive, planetocentric Mars
+  coordinates, the Curiosity reference waypoints and source credits, and the
+  elevation profile. The profile samples the DEM cells along a straight line
+  between the rover positions. Its distance is measured on the Mars reference
+  sphere. Missing elevations produce gaps and leave ascent and descent unset.
+
+Start the backend as described in the [README](../README.md) and open
+[`/api/mission/boxwork/preview`](http://127.0.0.1:8000/api/mission/boxwork/preview).
+The viewer also has a link to this 2D preview. The website reads
+`/api/mission/boxwork/analysis` and `/api/mission/boxwork/slope.png`.
+The regular raster inspection endpoint can read `boxwork/slope.tif`.
+
+The reference transect is for checking the data pipeline. Its elevation changes
+describe the DEM profile between rover positions. Route planning and surface
+hazard assessment require additional validation.
+
+Codex assisted with source research, scripting, the web preview, and documentation.

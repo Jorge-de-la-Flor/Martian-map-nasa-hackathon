@@ -40,7 +40,8 @@ Place a raster under `data/`. The API only accepts files inside the configured d
 directory. Inspection reports metadata; it does not assume a raster is a Mars dataset.
 
 See [Mount Sharp boxwork data](docs/mount-sharp-boxwork.md) for two Curiosity
-reference waypoints and instructions to extract the local Gale elevation grid.
+reference waypoints, instructions to extract the local Gale elevation grid, and a
+web preview of the slope map and reference elevation profile.
 
 ## Scientific limitation
 A DEM-derived route is not a guarantee of traversability or safety. Orbital elevation

@@ -49,6 +49,7 @@ app.innerHTML = `
           <p class="eyebrow">PLANNER STATUS</p><p>Awaiting mission parameters.</p>
         </div>
         <div class="notice"><strong>DATA LIMITATION</strong><p>Orbital elevation data cannot guarantee surface traversability or detect every local hazard.</p></div>
+        <a id="boxwork-preview" class="terrain-link" href="/api/mission/boxwork/preview">Open Mount Sharp terrain analysis</a>
       </aside>
       <section class="map-panel" aria-label="3D globe">
         <div id="cesium-container"></div>
@@ -62,6 +63,8 @@ app.innerHTML = `
 const apiStatus = document.querySelector<HTMLSpanElement>("#api-status")!;
 const planButton = document.querySelector<HTMLButtonElement>("#plan-button")!;
 const resultBox = document.querySelector<HTMLDivElement>("#plan-result")!;
+const boxworkPreview = document.querySelector<HTMLAnchorElement>("#boxwork-preview")!;
+boxworkPreview.href = `${API_BASE_URL}/api/mission/boxwork/preview`;
 
 function setResult(message: string, state: "info" | "warning" | "error" = "info") {
   resultBox.dataset.state = state;

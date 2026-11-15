@@ -13,3 +13,4 @@ dist/
 *.tif
 *.tiff
 *.vrt
+data/boxwork/
