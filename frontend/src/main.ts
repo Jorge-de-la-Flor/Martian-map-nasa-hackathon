@@ -2,7 +2,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./style.css";
 
 import {
-  BoundingSphere, Cartesian3, Cartographic, Cesium3DTileset, Color, ConstantPositionProperty,
+  BoundingSphere,Cartesian2, Cartesian3, Cartographic, Cesium3DTileset, Color, ConstantPositionProperty,
   ConstantProperty, Ellipsoid, EllipsoidGeodesic, HeadingPitchRange, HeightReference, Ion,
   Math as CesiumMath, PinBuilder, PolylineDashMaterialProperty,PolylineGlowMaterialProperty, ScreenSpaceEventHandler,
   ScreenSpaceEventType, VerticalOrigin, Viewer,
@@ -88,6 +88,13 @@ app.innerHTML = `
       </aside>
       <section class="map-panel" aria-label="3D globe">
         <div id="cesium-container"></div>
+                <div id="site-photo" class="site-photo" hidden>
+          <button id="site-photo-close" class="site-photo-close" aria-label="Close">×</button>
+          <img id="site-photo-img" alt="" />
+          <p class="eyebrow">ARRIVAL VIEW · REAL IMAGE</p>
+          <p id="site-photo-caption"></p>
+          <p id="site-photo-credit" class="site-photo-credit"></p>
+        </div>
         <div class="map-overlay"><span class="eyebrow">PLANETARY VIEW</span><span class="map-caption" id="map-caption">Loading Cesium Mars…</span></div>
       </section>
     </section>
@@ -239,6 +246,55 @@ const targetEntity = viewer.entities.add({
   },
 });
 
+// Miniatura de la foto real, flotando sobre el sitio
+const targetPhotoEntity = viewer.entities.add({
+  name: "Target photo",
+  show: false,
+  position: Cartesian3.fromDegrees(0, 0),
+  billboard: {
+    width: 160,
+    height: 100,
+    verticalOrigin: VerticalOrigin.BOTTOM,
+    pixelOffset: new Cartesian2(0, -56), // encima del pin
+    heightReference: HeightReference.CLAMP_TO_GROUND,
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  },
+  label: {
+    text: "",
+    font: "bold 12px sans-serif",
+    fillColor: Color.WHITE,
+    showBackground: true,
+    backgroundColor: Color.fromCssColorString("#0c121a").withAlpha(0.85),
+    verticalOrigin: VerticalOrigin.BOTTOM,
+    pixelOffset: new Cartesian2(0, -162), // encima de la foto
+    heightReference: HeightReference.CLAMP_TO_GROUND,
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  },
+});
+
+// Carga la foto y le pone un borde naranja (recortada sin deformarse)
+function loadFramedPhoto(src: string): Promise<HTMLCanvasElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = 320, h = 200, border = 6;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = "#f08a4b";
+      ctx.fillRect(0, 0, w, h);
+      const innerW = w - 2 * border, innerH = h - 2 * border;
+      const scale = Math.max(innerW / img.width, innerH / img.height) * 1.4; // zoom al centro
+      const sw = innerW / scale, sh = innerH / scale;
+      ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, border, border, innerW, innerH);
+      resolve(canvas);
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
 function renderBrief(mission: Mission): void {
   const totalMass = mission.equipment.reduce((sum, e) => sum + e.massKg, 0);
   const equipment = mission.equipment.map((e) => `${e.item} (${e.massKg} kg)`).join(", ");
@@ -264,6 +320,15 @@ function selectMission(mission: Mission): void {
   // Mostrar el objetivo y volar hacia él
   targetEntity.position = new ConstantPositionProperty(Cartesian3.fromDegrees(longitude, latitude));
   targetEntity.show = true;
+
+    targetPhotoEntity.position = new ConstantPositionProperty(Cartesian3.fromDegrees(longitude, latitude));
+  targetPhotoEntity.label!.text = new ConstantProperty(mission.target.label);
+  loadFramedPhoto(mission.photo.src)
+    .then((canvas) => {
+      targetPhotoEntity.billboard!.image = new ConstantProperty(canvas);
+      targetPhotoEntity.show = true;
+    })
+    .catch((error) => console.error("Could not load site photo:", error));
   targetCartesian = Cartesian3.fromDegrees(longitude, latitude);
   updatePreview();
     
@@ -357,6 +422,7 @@ const previewLine = viewer.entities.add({
 });
 
 function updatePreview(): void {
+  document.querySelector<HTMLDivElement>("#site-photo")!.hidden = true;
   document.querySelector<HTMLButtonElement>("#traverse-button")!.disabled = true;
   if (!targetCartesian) return;
   previewLine.polyline!.positions = new ConstantProperty([astronautCartesian, targetCartesian]);
@@ -395,6 +461,12 @@ setResult("Select a mission, then click on the terrain to place the astronaut.",
 const clickHandler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 clickHandler.setInputAction((click: ScreenSpaceEventHandler.PositionedEvent) => {
   if (animating) return;
+    // Si hizo clic en la miniatura, abrir la foto grande en vez de mover al astronauta
+  const pickedObject = viewer.scene.pick(click.position);
+  if (pickedObject?.id === targetPhotoEntity && currentMission) {
+    showSitePhoto(currentMission);
+    return;
+  }
 
   if (!viewer.scene.pickPositionSupported) return;
   const picked = viewer.scene.pickPosition(click.position);
@@ -583,6 +655,8 @@ function finishTraverse(point: Cartesian3, turnedBack: boolean, elapsedH: number
         `${elapsedH.toFixed(1)} h of walking. Ready to start the science work.`,
       "info"
     );
+
+    if (currentMission) showSitePhoto(currentMission);
   }
 }
 
@@ -601,6 +675,22 @@ traverseButton.addEventListener("click", startTraverse);
 
 
 
+// ---------- Foto real del lugar al llegar ----------
+const sitePhoto = document.querySelector<HTMLDivElement>("#site-photo")!;
+const sitePhotoImg = document.querySelector<HTMLImageElement>("#site-photo-img")!;
+const sitePhotoCaption = document.querySelector<HTMLParagraphElement>("#site-photo-caption")!;
+const sitePhotoCredit = document.querySelector<HTMLParagraphElement>("#site-photo-credit")!;
+
+function showSitePhoto(mission: Mission): void {
+  sitePhotoImg.src = mission.photo.src;
+  sitePhotoImg.alt = mission.photo.caption;
+  sitePhotoCaption.textContent = mission.photo.caption;
+  sitePhotoCredit.textContent = `Image: ${mission.photo.credit}`;
+  sitePhoto.hidden = false;
+}
+
+document.querySelector<HTMLButtonElement>("#site-photo-close")!
+  .addEventListener("click", () => { sitePhoto.hidden = true; });
 
 
 

@@ -57,3 +57,10 @@ footer { height: 34px; flex: 0 0 34px; display: flex; justify-content: space-bet
 
 .secondary-button { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
 .secondary-button:disabled { opacity: .35; cursor: not-allowed; }
+
+.map-panel { position: relative; }
+.site-photo { position: absolute; right: 16px; bottom: 16px; z-index: 10; width: 320px; padding: 10px; background: rgba(12, 18, 26, .92); border: 1px solid var(--accent); border-radius: 10px; box-shadow: 0 8px 30px rgba(0, 0, 0, .5); }
+.site-photo img { display: block; width: 100%; height: 170px; object-fit: cover; object-position: center; border-radius: 6px; margin-bottom: 8px; transform: scale(1.35); clip-path: inset(13%); }
+.site-photo p { margin: 4px 0 0; color: #c5d0d8; font-size: 11px; }
+.site-photo .site-photo-credit { color: var(--muted); font-size: 10px; }
+.site-photo-close { position: absolute; top: 14px; right: 14px; width: 26px; height: 26px; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .6); color: #fff; font-size: 16px; cursor: pointer; }

@@ -12,6 +12,7 @@ export interface Mission {
   equipment: Array<{ item: string; massKg: number }>;
   evaMaxHours: number; // tiempo máximo de caminata (oxígeno)
   difficulty: "Low" | "Medium" | "High";
+  photo: { src: string; caption: string; credit: string }; 
 }
 
 // Base del astronauta: sitio de aterrizaje de Curiosity
@@ -37,6 +38,11 @@ export const MISSIONS: Mission[] = [
     ],
     evaMaxHours: 6,
     difficulty: "High",
+        photo: {
+      src: "/missions/boxwork.jpg",
+      caption: "Curiosity's Mastcam view of a curb-like boxwork ridge on Mount Sharp (PIA26558).",
+      credit: "NASA/JPL-Caltech/MSSS",
+    },
   },
   {
     id: "nazca",
@@ -51,5 +57,10 @@ export const MISSIONS: Mission[] = [
     ],
     evaMaxHours: 6,
     difficulty: "Medium",
+        photo: {
+      src: "/missions/nazca.jpg",
+      caption: "Curiosity's MAHLI close-up of disc-shaped crystal forms on the 'Nazca' drill target (sol 5048).",
+      credit: "NASA/JPL-Caltech/MSSS",
+    },
   },
 ];
