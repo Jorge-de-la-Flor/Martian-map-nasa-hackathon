@@ -8,6 +8,10 @@ import {
   ScreenSpaceEventType, VerticalOrigin, Viewer,
 } from "cesium";
 import { HABITAT, MISSIONS, type Coordinate, type Mission } from "./missions";
+import {
+  GALE_ENVIRONMENT, RADIATION_MSV_PER_HOUR, airTempAt, batteryDrainPerHour, heartRateBpm,
+  levelFromAirTemp, levelFromHeartRate, levelFromPercent, o2Multiplier, type Level,
+} from "./environment";
 
 // Configuración de Cesium para Marte
 (window as any).CESIUM_BASE_URL = "/cesiumStatic";
@@ -65,6 +69,19 @@ app.innerHTML = `
         <div id="mission-brief" class="result">
           <p class="eyebrow">MISSION BRIEF</p><p>Select a mission to see its objective.</p>
         </div>
+
+                <div class="field">
+          <label for="eva-start">EVA START · LOCAL MARS TIME</label>
+          <select id="eva-start">
+            <option value="6">06:00 · dawn</option>
+            <option value="8">08:00</option>
+            <option value="10" selected>10:00</option>
+            <option value="12">12:00 · noon</option>
+            <option value="14">14:00</option>
+            <option value="16">16:00</option>
+            <option value="18">18:00 · dusk</option>
+          </select>
+        </div>
         <div class="field">
           <label for="profile">ROUTE PROFILE</label>
           <select id="profile">
@@ -88,6 +105,15 @@ app.innerHTML = `
       </aside>
       <section class="map-panel" aria-label="3D globe">
         <div id="cesium-container"></div>
+                <div id="telemetry" class="telemetry">
+          <p class="eyebrow">SUIT TELEMETRY</p>
+          <div class="tm-row" id="tm-o2"><span>O₂ left</span><strong>—</strong><em>SIM</em></div>
+          <div class="tm-row" id="tm-hr"><span>Heart rate</span><strong>—</strong><em>SIM</em></div>
+          <div class="tm-row" id="tm-battery"><span>Suit battery</span><strong>—</strong><em>SIM</em></div>
+          <div class="tm-row" id="tm-air"><span>Air temp</span><strong>—</strong><em>REMS</em></div>
+          <div class="tm-row" id="tm-pressure"><span>Pressure</span><strong>—</strong><em>REMS</em></div>
+          <div class="tm-row" id="tm-radiation"><span>Radiation dose</span><strong>—</strong><em>RAD</em></div>
+        </div>
                 <div id="site-photo" class="site-photo" hidden>
           <button id="site-photo-close" class="site-photo-close" aria-label="Close">×</button>
           <img id="site-photo-img" alt="" />
@@ -309,6 +335,7 @@ function renderBrief(mission: Mission): void {
 
 function selectMission(mission: Mission): void {
   currentMission = mission;
+    resetTelemetry();
 
   const { longitude, latitude } = mission.target;
   renderBrief(mission);
@@ -532,17 +559,22 @@ function drawRoute(route: Coordinate[], isDemo: boolean): void {
   const oneWayH = km / WALK_SPEED_KMH;
   const roundTripH = oneWayH * 2; // tiene que volver a la base con oxígeno
   const limit = currentMission?.evaMaxHours;
-  const withinLimit = limit === undefined || roundTripH <= limit;
+    const o2NeededH = roundTripH * o2Multiplier(missionLoadKg()); // con el peso del equipo
+  const withinLimit = limit === undefined || o2NeededH <= limit;
+  const returnHour = Number(evaStartSelect.value) + roundTripH;
+  const afterDusk = returnHour > 18;
 
-  setResult(
+    setResult(
     (isDemo ? "DEMO ROUTE (not computed by the planner yet) · " : "") +
       `Distance ${km.toFixed(2)} km · One-way ≈ ${oneWayH.toFixed(1)} h · ` +
-      `Round trip ≈ ${roundTripH.toFixed(1)} h` +
+      `Round trip ≈ ${roundTripH.toFixed(1)} h · O₂ needed ≈ ${o2NeededH.toFixed(1)} h` +
       (limit !== undefined ? ` / EVA limit ${limit} h` : "") +
-      (withinLimit ? "" : " · ⚠ EXCEEDS EVA LIMIT"),
-    isDemo || !withinLimit ? "warning" : "info"
+      (withinLimit ? "" : " · ⚠ NOT ENOUGH O₂") +
+      (afterDusk
+        ? ` · ⚠ Returns after dusk (~${Math.floor(returnHour % 24)}:00, air ≈ ${Math.round(airTempAt(returnHour))} °C)`
+        : ""),
+    isDemo || !withinLimit || afterDusk ? "warning" : "info"
   );
-
   // Encuadrar la ruta completa
   const sphere = BoundingSphere.fromPoints(
     route.map((p) => Cartesian3.fromDegrees(p.longitude, p.latitude, GALE_SURFACE_HEIGHT_M))
@@ -597,7 +629,7 @@ function startTraverse(): void {
   const limit = currentMission?.evaMaxHours;
 
   // Punto de no retorno: con la mitad del oxígeno hay que volver a la base
-  const turnaroundH = limit !== undefined ? limit / 2 : Infinity;
+   const turnaroundH = limit !== undefined ? limit / (2 * o2Multiplier(missionLoadKg())) : Infinity;
   const stopFraction = Math.min(1, turnaroundH / oneWayH);
   const mustTurnBack = stopFraction < 1;
 
@@ -617,6 +649,7 @@ function startTraverse(): void {
     astronautPosition.setValue(point);
 
     const elapsedH = progress * oneWayH;
+    renderTelemetry(telemetryAt(elapsedH, true));
     const oxygen = limit !== undefined ? ` · O₂ left ${(limit - elapsedH).toFixed(1)} h` : "";
     setResult(
       `TRAVERSING · ${((progress * totalM) / 1000).toFixed(2)} / ${(totalM / 1000).toFixed(2)} km` +
@@ -634,6 +667,7 @@ function startTraverse(): void {
 }
 
 function finishTraverse(point: Cartesian3, turnedBack: boolean, elapsedH: number): void {
+  renderTelemetry(telemetryAt(elapsedH, false));
   animating = false;
   planButton.disabled = false;
 
@@ -695,6 +729,63 @@ document.querySelector<HTMLButtonElement>("#site-photo-close")!
 
 
 
+
+
+
+// ---------- Telemetría del traje ----------
+const evaStartSelect = document.querySelector<HTMLSelectElement>("#eva-start")!;
+
+interface Telemetry {
+  o2LeftH: number;
+  o2Pct: number;
+  heartRate: number;
+  batteryPct: number;
+  airTempC: number;
+  radiationMsv: number;
+}
+
+function missionLoadKg(): number {
+  return currentMission ? currentMission.equipment.reduce((sum, e) => sum + e.massKg, 0) : 0;
+}
+
+function setRow(id: string, value: string, level?: Level): void {
+  const row = document.querySelector<HTMLDivElement>(`#${id}`)!;
+  row.querySelector("strong")!.textContent = value;
+  if (level) row.dataset.level = level;
+  else delete row.dataset.level;
+}
+
+function renderTelemetry(t: Telemetry): void {
+  setRow("tm-o2", `${t.o2LeftH.toFixed(1)} h · ${Math.round(t.o2Pct)}%`, levelFromPercent(t.o2Pct));
+  setRow("tm-hr", `${t.heartRate} bpm`, levelFromHeartRate(t.heartRate));
+  setRow("tm-battery", `${Math.round(t.batteryPct)}%`, levelFromPercent(t.batteryPct));
+  setRow("tm-air", `${Math.round(t.airTempC)} °C`, levelFromAirTemp(t.airTempC));
+  setRow("tm-pressure", `${GALE_ENVIRONMENT.pressureMinPa}–${GALE_ENVIRONMENT.pressureMaxPa} Pa`);
+  setRow("tm-radiation", `${t.radiationMsv.toFixed(3)} mSv`, "ok");
+}
+
+// Telemetría a cierta hora de la caminata (elapsedH = horas desde que salió)
+function telemetryAt(elapsedH: number, walking: boolean): Telemetry {
+  const limit = currentMission?.evaMaxHours ?? 6;
+  const loadKg = missionLoadKg();
+  const o2LeftH = Math.max(limit - elapsedH * o2Multiplier(loadKg), 0);
+  const airTempC = airTempAt(Number(evaStartSelect.value) + elapsedH);
+  return {
+    o2LeftH,
+    o2Pct: (o2LeftH / limit) * 100,
+    heartRate: walking ? heartRateBpm(loadKg, 3 * Math.sin(elapsedH * 40)) : 72,
+    batteryPct: Math.max(100 - elapsedH * batteryDrainPerHour(airTempC), 0),
+    airTempC,
+    radiationMsv: elapsedH * RADIATION_MSV_PER_HOUR,
+  };
+}
+
+function resetTelemetry(): void {
+  renderTelemetry(telemetryAt(0, false));
+}
+
+evaStartSelect.addEventListener("change", resetTelemetry);
+resetTelemetry();
 
 
 
