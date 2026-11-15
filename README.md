@@ -39,6 +39,9 @@ Open the Vite URL printed in the terminal. Set `VITE_API_BASE_URL` in
 Place a raster under `data/`. The API only accepts files inside the configured data
 directory. Inspection reports metadata; it does not assume a raster is a Mars dataset.
 
+See [Mount Sharp boxwork data](docs/mount-sharp-boxwork.md) for two Curiosity
+reference waypoints and instructions to extract the local Gale elevation grid.
+
 ## Scientific limitation
 A DEM-derived route is not a guarantee of traversability or safety. Orbital elevation
 products may not resolve small rocks, loose sand, local hazards, or recent surface changes.
