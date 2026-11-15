@@ -63,4 +63,22 @@ export const MISSIONS: Mission[] = [
       credit: "NASA/JPL-Caltech/MSSS",
     },
   },
-];
+  ];
+
+  // Zona de estudio permitida: Gale, desde Bradbury Landing hasta las faldas de Mount Sharp
+export const STUDY_ZONE = {
+  label: "Gale crater study zone",
+  west: 137.30,
+  east: 137.50,
+  south: -4.90,
+  north: -4.52,
+};
+
+export function isInsideZone(longitude: number, latitude: number): boolean {
+  return (
+    longitude >= STUDY_ZONE.west &&
+    longitude <= STUDY_ZONE.east &&
+    latitude >= STUDY_ZONE.south &&
+    latitude <= STUDY_ZONE.north
+  );
+}

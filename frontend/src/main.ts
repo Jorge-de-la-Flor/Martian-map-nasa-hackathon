@@ -4,10 +4,10 @@ import "./style.css";
 import {
   BoundingSphere,Cartesian2, Cartesian3, Cartographic, Cesium3DTileset, Color, ConstantPositionProperty,
   ConstantProperty, Ellipsoid, EllipsoidGeodesic, HeadingPitchRange, HeightReference, Ion,
-  Math as CesiumMath, PinBuilder, PolylineDashMaterialProperty,PolylineGlowMaterialProperty, ScreenSpaceEventHandler,
+  Math as CesiumMath, PinBuilder, PolylineDashMaterialProperty,PolylineGlowMaterialProperty, Rectangle, ScreenSpaceEventHandler,
   ScreenSpaceEventType, VerticalOrigin, Viewer,
 } from "cesium";
-import { HABITAT, MISSIONS, type Coordinate, type Mission } from "./missions";
+import { HABITAT, MISSIONS, STUDY_ZONE, isInsideZone, type Coordinate, type Mission } from "./missions";
 import {
   GALE_ENVIRONMENT, RADIATION_MSV_PER_HOUR, airTempAt, batteryDrainPerHour, heartRateBpm,
   levelFromAirTemp, levelFromHeartRate, levelFromPercent, o2Multiplier, type Level,
@@ -182,6 +182,12 @@ async function requestPlan(): Promise<void> {
       destination: { longitude: readNumber("end-lon"), latitude: readNumber("end-lat") },
       profile
     };
+
+        if (!isInsideZone(payload.start.longitude, payload.start.latitude)) {
+      throw new Error(
+        "⚠ OUTSIDE STUDY ZONE · The start point must be inside the blue dashed zone to plan a route."
+      );
+    }
 
     // 1) Pedir la ruta al backend
     let plan: PlanResponse | null = null;
@@ -359,15 +365,13 @@ function selectMission(mission: Mission): void {
   targetCartesian = Cartesian3.fromDegrees(longitude, latitude);
   updatePreview();
     
-  const oldRoute = viewer.entities.getById("planned-route");
-  if (oldRoute) oldRoute.show = false;
-  if (!targetCartesian) return;
+ 
 
   viewer.camera.flyToBoundingSphere(
     new BoundingSphere(Cartesian3.fromDegrees(longitude, latitude, GALE_SURFACE_HEIGHT_M), 1500),
     { offset: new HeadingPitchRange(0, CesiumMath.toRadians(-35), 9000), duration: 2.5 }
   );
-    prepareTraverse(route, oneWayH);
+    
 }
 
 // selector de misiones
@@ -378,6 +382,8 @@ missionSelect.innerHTML =
 missionSelect.addEventListener("change", () => {
   const mission = MISSIONS.find((m) => m.id === missionSelect.value);
   if (mission) selectMission(mission);
+
+
 });
 
 
@@ -422,6 +428,29 @@ viewer.entities.add({
   },
 });
 
+
+
+// Zona de estudio: relleno azul suave + borde punteado sobre el terreno
+const { west, south, east, north } = STUDY_ZONE;
+viewer.entities.add({
+  name: STUDY_ZONE.label,
+  rectangle: {
+    coordinates: Rectangle.fromDegrees(west, south, east, north),
+    material: Color.fromCssColorString("#4fa3d9").withAlpha(0.08),
+  },
+});
+viewer.entities.add({
+  name: `${STUDY_ZONE.label} border`,
+  polyline: {
+    positions: Cartesian3.fromDegreesArray([
+      west, south, east, south, east, north, west, north, west, south,
+    ]),
+    width: 2,
+    clampToGround: true,
+    material: new PolylineDashMaterialProperty({ color: Color.fromCssColorString("#4fa3d9"), dashLength: 20 }),
+  },
+});
+
 // Astronauta (empieza en la base)
 const astronautEntity = viewer.entities.add({
   name: "Astronaut",
@@ -451,6 +480,8 @@ const previewLine = viewer.entities.add({
 function updatePreview(): void {
   document.querySelector<HTMLDivElement>("#site-photo")!.hidden = true;
   document.querySelector<HTMLButtonElement>("#traverse-button")!.disabled = true;
+  const oldRoute = viewer.entities.getById("planned-route");
+  if (oldRoute) oldRoute.show = false;
   if (!targetCartesian) return;
   previewLine.polyline!.positions = new ConstantProperty([astronautCartesian, targetCartesian]);
   previewLine.show = true;
@@ -497,7 +528,21 @@ clickHandler.setInputAction((click: ScreenSpaceEventHandler.PositionedEvent) => 
 
   if (!viewer.scene.pickPositionSupported) return;
   const picked = viewer.scene.pickPosition(click.position);
-  if (picked) placeAstronaut(picked);
+    if (!picked) return;
+
+  // ¿El punto está dentro de la zona de estudio?
+  const carto = Cartographic.fromCartesian(picked);
+  const lon = CesiumMath.toDegrees(carto.longitude);
+  const lat = CesiumMath.toDegrees(carto.latitude);
+  if (!isInsideZone(lon, lat)) {
+    setResult(
+      `⚠ OUTSIDE STUDY ZONE · That point (${lon.toFixed(3)}°, ${lat.toFixed(3)}°) is too far from the mission area. ` +
+        `Place the astronaut inside the blue dashed zone.`,
+      "error"
+    );
+    return; // el astronauta NO se mueve
+  }
+  placeAstronaut(picked);
 }, ScreenSpaceEventType.LEFT_CLICK);
 // SUPUESTO: velocidad media caminando con traje y equipo. Acordar el valor con el equipo.
 const WALK_SPEED_KMH = 2;
@@ -786,6 +831,9 @@ function resetTelemetry(): void {
 
 evaStartSelect.addEventListener("change", resetTelemetry);
 resetTelemetry();
+
+
+
 
 
 
