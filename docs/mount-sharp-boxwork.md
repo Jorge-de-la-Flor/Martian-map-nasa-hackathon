@@ -63,7 +63,14 @@ The generated files under `data/boxwork/` stay local:
 
 Start the backend as described in the [README](../README.md) and open
 [`/api/mission/boxwork/preview`](http://127.0.0.1:8000/api/mission/boxwork/preview).
-The viewer also has a link to this 2D preview. The website reads
+The viewer also links to this 2D preview. Select **Boxwork ridges survey** for
+the two rover reference stops, a profile and a switch to drape the slope image
+over Cesium Mars. Selecting a stop sets the route planner's destination. The
+overlay and rover positions use the spherical Mars coordinate convention of
+the source raster. Cesium Mars tiles retain their native ellipsoid. The 3D
+terrain uses the existing `VITE_CESIUM_ION_TOKEN` configuration. If the terrain
+is unavailable, the stop details and profile can still load from the local API.
+The website reads
 `/api/mission/boxwork/analysis` and `/api/mission/boxwork/slope.png`.
 The regular raster inspection endpoint can read `boxwork/slope.tif`.
 
@@ -71,4 +78,8 @@ The reference transect is for checking the data pipeline. Its elevation changes
 describe the DEM profile between rover positions. Route planning and surface
 hazard assessment require additional validation.
 
-Codex assisted with source research, scripting, the web preview, and documentation.
+The mission's RAD panel estimates exposure from a historical Gale reference
+reported by NASA for August 2012 to June 2013.
+[NASA's RAD reference](https://www.nasa.gov/news-release/nasa-rover-results-include-first-age-measurement-on-mars-and-help-for-human-exploration/)
+
+Codex assisted with source research, scripting, the web preview, 3D viewer integration, and documentation.

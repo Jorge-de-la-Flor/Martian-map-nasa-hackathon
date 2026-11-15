@@ -74,3 +74,22 @@ footer { height: 34px; flex: 0 0 34px; display: flex; justify-content: space-bet
 .tm-row[data-level="ok"] strong { color: #6fd08c; }
 .tm-row[data-level="warn"] strong { color: #f0c24b; }
 .tm-row[data-level="danger"] strong { color: #f06b5b; }
+.telemetry-source { display: block; margin-top: 6px; color: #e5a16e; font-size: 10px; }
+.boxwork-panel { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.boxwork-panel h3, .boxwork-panel h4 { margin: 0 0 8px; font-size: 14px; }
+.boxwork-panel h4 { margin: 12px 0 0; font-size: 13px; }
+.boxwork-panel p { margin: 8px 0; color: #bcc9d2; font-size: 12px; }
+.boxwork-panel p:empty { display: none; }
+.boxwork-panel .terrain-link { margin-top: 0; }
+.boxwork-controls, .boxwork-sites { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.boxwork-controls label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.boxwork-controls input { width: auto; margin: 0; accent-color: var(--accent); }
+.boxwork-panel button { padding: 5px 7px; border: 1px solid #546575; border-radius: 5px; background: #192630; color: inherit; font-size: 12px; cursor: pointer; }
+.boxwork-panel button:disabled { opacity: .5; cursor: default; }
+.boxwork-sites { margin-top: 10px; }
+.boxwork-sites button[aria-pressed="true"] { border-color: var(--accent); color: #ffc29f; }
+.boxwork-legend { display: flex; flex-wrap: wrap; gap: 4px 9px; list-style: none; padding: 0; margin: 8px 0 0; font-size: 10px; }
+.boxwork-legend[hidden] { display: none; }
+.boxwork-legend li { display: flex; align-items: center; gap: 4px; }
+.boxwork-legend span { display: inline-block; width: 10px; height: 10px; border: 1px solid #b9c3cb70; border-radius: 2px; }
+.boxwork-chart { display: block; width: 100%; height: auto; }
