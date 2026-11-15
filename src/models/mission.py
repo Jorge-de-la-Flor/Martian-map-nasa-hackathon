@@ -24,7 +24,7 @@ class PlanRequest(BaseModel):
 
 
 class PlanResponse(BaseModel):
-    status: Literal["not_implemented", "planned"]
+    status: Literal["not_implemented", "outside_coverage", "no_path", "planned"]
     profile: RouteProfile
     message: str
     route: list[Coordinate] = Field(default_factory=list)

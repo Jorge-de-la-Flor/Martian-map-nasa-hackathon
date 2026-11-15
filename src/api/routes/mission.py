@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from core.config import get_settings
 from geospatial.raster import RasterInspectionError, inspect_raster
 from models.mission import MissionInfo, PlanRequest, PlanResponse, RasterInfo
-from services.planner import RoutePlanner
+from services.planner import DEM_NAME, RoutePlanner
 
 router = APIRouter(prefix="/mission", tags=["mission"])
 planner = RoutePlanner()
@@ -15,7 +15,9 @@ def mission_info() -> MissionInfo:
         name="Martian Map",
         description="Mars exploration viewer and terrain-aware route-planning prototype.",
         route_profiles=["direct", "low_slope", "conservative"],
-        planning_status="not_implemented",
+        planning_status="ready"
+        if (get_settings().data_dir / DEM_NAME).is_file()
+        else "not_implemented",
     )
 
 

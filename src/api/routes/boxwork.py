@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -26,6 +27,16 @@ def boxwork_analysis() -> FileResponse:
 @router.get("/slope.png", response_class=FileResponse)
 def boxwork_slope_image() -> FileResponse:
     return boxwork_file("slope.png", "image/png")
+
+
+@router.get("/imagery", response_class=FileResponse)
+def boxwork_imagery() -> FileResponse:
+    return boxwork_file("imagery.json", "application/json")
+
+
+@router.get("/{name}.png", response_class=FileResponse, include_in_schema=False)
+def gale_imagery_image(name: Literal["gale-context", "gale", "mount-sharp"]) -> FileResponse:
+    return boxwork_file(f"{name}.png", "image/png")
 
 
 @router.get("/preview", response_class=FileResponse, include_in_schema=False)

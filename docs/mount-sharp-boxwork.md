@@ -12,6 +12,8 @@ locate the workspaces. Surveyed drill-hole coordinates would require another sou
 | [Curiosity location map](https://science.nasa.gov/mission/msl-curiosity/location-map/) and [public waypoint data](https://mars.nasa.gov/mmgis-maps/MSL/Layers/json/MSL_waypoints.json) | Source of the positions, sols, and rover motion counter identifiers in [the site catalog](../data/mount-sharp-boxwork-sites.json). Credit NASA/JPL-Caltech. |
 | [Valle de la Luna](https://science.nasa.gov/blog/curiosity-blog-sols-4689-4694-drill-in-the-boxwork-unit/), [Nevado Sajama](https://science.nasa.gov/blog/curiosity-blog-sols-4716-4722-drilling-success-at-nevado-sajama/) and [JPL's sample results](https://www.jpl.nasa.gov/news/nasas-curiosity-rover-sees-martian-spiderwebs-up-close/) | Site descriptions and reported mineral identifications for the specific samples. Credit NASA/JPL-Caltech. |
 | [Mars MSL Gale Merged DEM 1m, v3](https://astrogeology.usgs.gov/search/map/mars_msl_gale_merged_dem_1m) | Calef III and Parker (2016), NASA/JPL and USGS Astrogeology. Astropedia asks for author credit and lists no use constraints. The script reads the USGS download mirror. |
+| [NASA/JPL Mars Trek WMTS](https://trek.nasa.gov/tiles/apidoc/trekAPI.html?body=mars) | Public MRO CTX Gale Crater Mosaic, layer `Gale_CTX_BlockAdj_dd`. |
+| [USGS Gale imagery](https://astrogeology.usgs.gov/search/map/mars_msl_gale_merged_orthophoto_mosaic_25cm) | Optional local color imagery prepared from the USGS color COG. Credit the authors Parker and Calef III, and NASA/JPL and USGS Astrogeology. |
 
 For any Curiosity images added to the interface, use the product's credit line
 and follow the [JPL image use policy](https://www.jpl.nasa.gov/jpl-image-use-policy/).
@@ -78,8 +80,28 @@ The reference transect is for checking the data pipeline. Its elevation changes
 describe the DEM profile between rover positions. Route planning and surface
 hazard assessment require additional validation.
 
+## Use the Gale map and plan a route
+
+The main map opens in 2D using the public Mars Trek WMTS service. The 3D mode
+uses Cesium ion when a token is configured. Generate the local context
+mosaic from the public CTX tiles and the detailed images from the USGS
+color mosaic with:
+
+```bash
+uv run python scripts/build_gale_imagery.py
+```
+
+Select **Boxwork ridges survey** to start at a demonstration staging point
+inside the DEM. Use **Set start** and **Set destination** to choose points on
+the map. **Draw route** computes a path on the elevation grid
+when both points lie inside the crop. **Direct** minimizes grid distance.
+**Low slope** and **Conservative** increasingly penalize changes in elevation.
+Paths avoid NoData cells. Wider Gale imagery gives geographic context beyond
+the route planner's local coverage. The example start is a project choice.
+
 The mission's RAD panel estimates exposure from a historical Gale reference
 reported by NASA for August 2012 to June 2013.
 [NASA's RAD reference](https://www.nasa.gov/news-release/nasa-rover-results-include-first-age-measurement-on-mars-and-help-for-human-exploration/)
 
-Codex assisted with source research, scripting, the web preview, 3D viewer integration, and documentation.
+Codex assisted with source research, scripting, the map and planner integration,
+the web preview, and documentation.

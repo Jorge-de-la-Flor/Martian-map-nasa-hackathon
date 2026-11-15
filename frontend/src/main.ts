@@ -4,12 +4,13 @@ import "./style.css";
 import {
   BoundingSphere,Cartesian2, Cartesian3, Cartographic, Cesium3DTileset, Color, ConstantPositionProperty,
   ConstantProperty, Ellipsoid, EllipsoidGeodesic, HeadingPitchRange, HeightReference, Ion,
-  Math as CesiumMath, PinBuilder, PolylineDashMaterialProperty,PolylineGlowMaterialProperty, ScreenSpaceEventHandler,
-  ScreenSpaceEventType, VerticalOrigin, Viewer,
+  Math as CesiumMath, PinBuilder, PolylineDashMaterialProperty,PolylineGlowMaterialProperty, Rectangle, SceneMode,
+  ScreenSpaceEventHandler, ScreenSpaceEventType, VerticalOrigin, Viewer,
 } from "cesium";
 import { HABITAT, MISSIONS, type Coordinate, type Mission } from "./missions";
 import { createBoxworkPanel } from "./boxwork";
 import { MARS_REFERENCE } from "./mars-coordinates";
+import { addGaleImagery } from "./gale-basemap";
 import {
   GALE_ENVIRONMENT, RADIATION_MSV_PER_HOUR, airTempAt, batteryDrainPerHour, heartRateBpm,
   levelFromAirTemp, levelFromHeartRate, levelFromPercent, o2Multiplier, type Level,
@@ -21,9 +22,15 @@ Ellipsoid.default = MARS_REFERENCE;
 Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN;
 
 const CESIUM_MARS_ASSET_ID = 3644333;
+const GALE_VIEW = Rectangle.fromDegrees(137.29, -4.85, 137.52, -4.55);
+const BOXWORK_START = { longitude: 137.3799, latitude: -4.80813 };
 
 // Vista de la región de estudio: cráter Gale con Mount Sharp al centro
 function flyToGale(duration = 3): void {
+  if (viewer.scene.mode === SceneMode.SCENE2D) {
+    viewer.camera.flyTo({ destination: GALE_VIEW, duration });
+    return;
+  }
   viewer.camera.flyTo({
     destination: Cartesian3.fromDegrees(137.8, -8.6, 120_000), 
     orientation: {
@@ -85,14 +92,6 @@ app.innerHTML = `
             <option value="18">18:00 · dusk</option>
           </select>
         </div>
-        <div class="field">
-          <label for="profile">ROUTE PROFILE</label>
-          <select id="profile">
-            <option value="direct">Direct</option>
-            <option value="low_slope" selected>Low slope</option>
-            <option value="conservative">Conservative</option>
-          </select>
-        </div>
         <div class="coordinate-grid">
           <div class="field"><label for="start-lon">START LONGITUDE</label><input id="start-lon" type="number" step="any" value="137.4" /></div>
           <div class="field"><label for="start-lat">START LATITUDE</label><input id="start-lat" type="number" step="any" value="-4.6" /></div>
@@ -109,6 +108,29 @@ app.innerHTML = `
       </aside>
       <section class="map-panel" aria-label="3D globe">
         <div id="cesium-container"></div>
+        <div class="map-tools" aria-label="Map controls">
+          <div class="map-tool-row">
+            <button type="button" id="map-region">Gale</button>
+            <button type="button" id="map-start">Center on start</button>
+            <button type="button" id="map-zoom-in" aria-label="Zoom in">+</button>
+            <button type="button" id="map-zoom-out" aria-label="Zoom out">−</button>
+            <button type="button" id="map-mode" hidden>3D</button>
+          </div>
+          <div class="map-tool-row">
+            <button type="button" id="map-set-start" aria-pressed="false">Set start</button>
+            <button type="button" id="map-set-destination" aria-pressed="false">Set destination</button>
+          </div>
+          <div class="map-tool-row map-route-tools">
+            <select id="profile" aria-label="Route profile">
+              <option value="direct">Direct</option>
+              <option value="low_slope" selected>Low slope</option>
+              <option value="conservative">Conservative</option>
+            </select>
+            <button type="button" id="map-plan">Draw route</button>
+          </div>
+          <p id="map-instructions" role="status">Drag to pan · scroll to zoom</p>
+          <p id="map-route-status" role="status"></p>
+        </div>
                 <div id="telemetry" class="telemetry">
           <p class="eyebrow">SUIT TELEMETRY</p>
           <div class="tm-row" id="tm-o2"><span>O₂ left</span><strong>—</strong><em>SIM</em></div>
@@ -126,7 +148,7 @@ app.innerHTML = `
           <p id="site-photo-caption"></p>
           <p id="site-photo-credit" class="site-photo-credit"></p>
         </div>
-        <div class="map-overlay"><span class="eyebrow">PLANETARY VIEW</span><span class="map-caption" id="map-caption">Loading Cesium Mars…</span></div>
+        <div class="map-overlay"><span class="eyebrow">GALE CRATER</span><span class="map-caption" id="map-caption">Loading NASA imagery…</span></div>
       </section>
     </section>
     <footer><span>MARTIAN MAP / NASA SPACE APPS CONCEPT</span><span>PROTOTYPE BUILD 0.1.0</span></footer>
@@ -135,6 +157,8 @@ app.innerHTML = `
 
 const apiStatus = document.querySelector<HTMLSpanElement>("#api-status")!;
 const planButton = document.querySelector<HTMLButtonElement>("#plan-button")!;
+const mapPlanButton = document.querySelector<HTMLButtonElement>("#map-plan")!;
+const mapRouteStatus = document.querySelector<HTMLParagraphElement>("#map-route-status")!;
 const resultBox = document.querySelector<HTMLDivElement>("#plan-result")!;
 const mapCaption = document.querySelector<HTMLSpanElement>("#map-caption")!;
 const boxworkPreview = document.querySelector<HTMLAnchorElement>("#boxwork-preview")!;
@@ -182,6 +206,8 @@ function readNumber(id: string): number {
 async function requestPlan(): Promise<void> {
   const revision = previewRevision;
   planButton.disabled = true;
+  mapPlanButton.disabled = true;
+  mapRouteStatus.textContent = "Calculating route…";
   planButton.textContent = "ANALYZING…";
   try {
     const profile = document.querySelector<HTMLSelectElement>("#profile")!.value as RouteProfile;
@@ -210,57 +236,89 @@ async function requestPlan(): Promise<void> {
     // 2) Ruta real si existe; si no, ruta de ejemplo (DEMO)
     if (plan && plan.status === "planned" && plan.route.length > 1) {
       drawRoute(plan.route, false);
+    } else if (currentMission?.id === "boxwork") {
+      const message = plan?.message ?? "Route service unavailable. The dashed line is the direct preview.";
+      setResult(message, "warning");
+      mapRouteStatus.textContent = message;
     } else {
       drawRoute(buildDemoRoute(), true);
     }
   } catch (error) {
-    setResult(error instanceof Error ? error.message : "Unexpected error.", "error");
+    const message = error instanceof Error ? error.message : "Unexpected error.";
+    setResult(message, "error");
+    mapRouteStatus.textContent = message;
   } finally {
     planButton.disabled = false;
+    mapPlanButton.disabled = false;
     planButton.textContent = "REQUEST ROUTE ANALYSIS";
   }
 }
 planButton.addEventListener("click", () => void requestPlan());
+mapPlanButton.addEventListener("click", () => void requestPlan());
 
 // ---------- Visor 3D de Marte ----------
 const viewer = new Viewer("cesium-container", {
   ellipsoid: MARS_REFERENCE,
-  globe: false, 
+  sceneMode: SceneMode.SCENE2D,
+  baseLayer: false,
+  skyBox: false,
+  skyAtmosphere: false,
   baseLayerPicker: false,
   geocoder: false,
   sceneModePicker: false,
   animation: false,
   timeline: false,
-  homeButton: true,
+  homeButton: false,
   navigationHelpButton: false,
   infoBox: false,
   selectionIndicator: false,
   fullscreenButton: false,
   shouldAnimate: false,
 });
-
-async function loadMars(): Promise<Cesium3DTileset | undefined> {
-  try {
-    const mars = await Cesium3DTileset.fromIonAssetId(CESIUM_MARS_ASSET_ID, {
-      enableCollision: true,
-      ellipsoid: Ellipsoid.MARS,
-    });
-    viewer.scene.primitives.add(mars);
-    mapCaption.textContent = "Cesium Mars · NASA / USGS Astrogeology";
-    if (!missionSelect.value) flyToGale(4);
-    return mars;
-  } catch (error) {
-    mapCaption.textContent = "Could not load Cesium Mars (check ion token)";
-    console.error("No se pudo cargar Cesium Mars:", error);
-  }
-}
-const marsReady = loadMars();
-
-
-viewer.homeButton.viewModel.command.beforeExecute.addEventListener((event) => {
-  event.cancel = true;
-  flyToGale();
+viewer.scene.globe.baseColor = Color.fromCssColorString("#352720");
+viewer.scene.screenSpaceCameraController.minimumZoomDistance = 18;
+flyToGale(0);
+let baseMapCaption = "";
+void addGaleImagery(viewer, API_BASE_URL, (caption) => {
+  baseMapCaption = caption;
+  if (viewer.scene.mode === SceneMode.SCENE2D) mapCaption.textContent = caption;
 });
+
+let terrain: Cesium3DTileset | undefined;
+const mapMode = document.querySelector<HTMLButtonElement>("#map-mode")!;
+mapMode.hidden = !Ion.defaultAccessToken;
+mapMode.onclick = async () => {
+  if (viewer.scene.mode === SceneMode.SCENE3D) {
+    if (terrain) terrain.show = false;
+    viewer.scene.globe.show = true;
+    viewer.scene.morphTo2D(0);
+    mapCaption.textContent = baseMapCaption;
+    mapMode.textContent = "3D";
+    flyToGale(0);
+    boxwork.setSurface();
+    return;
+  }
+  mapMode.disabled = true;
+  try {
+    if (!terrain) {
+      terrain = await Cesium3DTileset.fromIonAssetId(CESIUM_MARS_ASSET_ID, {
+        enableCollision: true, ellipsoid: Ellipsoid.MARS,
+      });
+      viewer.scene.primitives.add(terrain);
+    }
+    viewer.scene.morphTo3D(0);
+    terrain.show = true;
+    viewer.scene.globe.show = false;
+    mapCaption.textContent = "Cesium Mars · NASA / USGS Astrogeology";
+    mapMode.textContent = "2D";
+    flyToGale(0);
+    boxwork.setSurface(terrain);
+  } catch {
+    mapCaption.textContent = baseMapCaption + " · 3D unavailable";
+  } finally {
+    mapMode.disabled = false;
+  }
+};
 
 
 
@@ -352,17 +410,15 @@ function updateMissionDestination({ longitude, latitude }: Coordinate): void {
   document.querySelector<HTMLInputElement>("#end-lat")!.value = String(latitude);
   targetCartesian = Cartesian3.fromDegrees(longitude, latitude);
   updatePreview();
-  const oldRoute = viewer.entities.getById("planned-route");
-  if (oldRoute) oldRoute.show = false;
 }
 
 const boxwork = createBoxworkPanel(
   viewer,
   document.querySelector<HTMLElement>("#boxwork-analysis")!,
   API_BASE_URL,
-  marsReady,
   (site) => {
     if (animating) return;
+    targetEntity.show = false;
     document.querySelector<HTMLElement>("#mission-target-label")!.textContent = site.name;
     updateMissionDestination(site);
   },
@@ -375,6 +431,7 @@ function selectMission(mission: Mission): void {
   updateMissionDestination(mission.target);
 
   const isBoxwork = mission.id === "boxwork";
+  if (isBoxwork) placeAstronaut(Cartesian3.fromDegrees(BOXWORK_START.longitude, BOXWORK_START.latitude));
   targetEntity.show = !isBoxwork;
   targetPhotoEntity.show = false;
   void boxwork.setActive(isBoxwork);
@@ -391,6 +448,13 @@ function selectMission(mission: Mission): void {
       targetPhotoEntity.show = true;
     })
     .catch((error) => console.error("Could not load site photo:", error));
+  if (viewer.scene.mode === SceneMode.SCENE2D) {
+    viewer.camera.flyTo({
+      destination: Rectangle.fromDegrees(longitude - 0.04, latitude - 0.04, longitude + 0.04, latitude + 0.04),
+      duration: 0.8,
+    });
+    return;
+  }
 
   viewer.camera.flyToBoundingSphere(
     new BoundingSphere(Cartesian3.fromDegrees(longitude, latitude, GALE_SURFACE_HEIGHT_M), 1500),
@@ -480,6 +544,9 @@ const previewLine = viewer.entities.add({
 
 function updatePreview(): void {
   previewRevision += 1;
+  mapRouteStatus.textContent = "";
+  const oldRoute = viewer.entities.getById("planned-route");
+  if (oldRoute) oldRoute.show = false;
   document.querySelector<HTMLDivElement>("#site-photo")!.hidden = true;
   document.querySelector<HTMLButtonElement>("#traverse-button")!.disabled = true;
   if (!targetCartesian) return;
@@ -493,7 +560,7 @@ function updatePreview(): void {
   ).surfaceDistance;
 
   setResult(
-    `Straight-line distance to target: ${(distanceM / 1000).toFixed(2)} km. ` +
+    `Straight-line distance to target: ${distanceM < 1000 ? distanceM.toFixed(0) + " m" : (distanceM / 1000).toFixed(2) + " km"}. ` +
       `Use "Request route analysis" to preview a traverse.`,
     "info"
   );
@@ -504,8 +571,8 @@ function placeAstronaut(cartesian: Cartesian3): void {
   astronautEntity.position = new ConstantPositionProperty(cartesian);
 
   const carto = Cartographic.fromCartesian(cartesian);
-  startLonInput.value = CesiumMath.toDegrees(carto.longitude).toFixed(5);
-  startLatInput.value = CesiumMath.toDegrees(carto.latitude).toFixed(5);
+  startLonInput.value = CesiumMath.toDegrees(carto.longitude).toFixed(8);
+  startLatInput.value = CesiumMath.toDegrees(carto.latitude).toFixed(8);
   updatePreview();
 }
 
@@ -513,12 +580,73 @@ function placeAstronaut(cartesian: Cartesian3): void {
 
 // Inicio en la base
 placeAstronaut(astronautCartesian);
-setResult("Select a mission, then click on the terrain to place the astronaut.", "info");
+setResult("Select a mission or use the map controls to set your start and destination.", "info");
+
+const mapTools = {
+  start: document.querySelector<HTMLButtonElement>("#map-set-start")!,
+  destination: document.querySelector<HTMLButtonElement>("#map-set-destination")!,
+};
+const mapInstructions = document.querySelector<HTMLParagraphElement>("#map-instructions")!;
+let placing: keyof typeof mapTools | undefined;
+function setPlacing(mode?: keyof typeof mapTools): void {
+  placing = mode;
+  mapTools.start.setAttribute("aria-pressed", String(mode === "start"));
+  mapTools.destination.setAttribute("aria-pressed", String(mode === "destination"));
+  viewer.scene.canvas.style.cursor = mode ? "crosshair" : "";
+  mapInstructions.textContent = mode ? `Click the map to set the ${mode}.` : "Drag to pan · scroll to zoom";
+}
+
+mapTools.start.onclick = () => setPlacing(placing === "start" ? undefined : "start");
+mapTools.destination.onclick = () => setPlacing(placing === "destination" ? undefined : "destination");
+document.querySelector<HTMLButtonElement>("#map-region")!.onclick = () => flyToGale(0.6);
+document.querySelector<HTMLButtonElement>("#map-start")!.onclick = () => {
+  const start = Cartographic.fromCartesian(astronautCartesian);
+  if (viewer.scene.mode === SceneMode.SCENE2D) {
+    const lon = CesiumMath.toDegrees(start.longitude);
+    const lat = CesiumMath.toDegrees(start.latitude);
+    viewer.camera.flyTo({
+      destination: Rectangle.fromDegrees(lon - 0.0015, lat - 0.0015, lon + 0.0015, lat + 0.0015),
+      duration: 0.6,
+    });
+  } else {
+    viewer.camera.flyToBoundingSphere(new BoundingSphere(astronautCartesian, 180), {
+      offset: new HeadingPitchRange(0, -Math.PI / 2, 550), duration: 0.7,
+    });
+  }
+};
+document.querySelector<HTMLButtonElement>("#map-zoom-in")!.onclick = () => {
+  if (viewer.scene.mode === SceneMode.SCENE2D) viewer.camera.zoomIn(viewer.camera.positionCartographic.height * 0.35);
+  else viewer.camera.zoomIn();
+};
+document.querySelector<HTMLButtonElement>("#map-zoom-out")!.onclick = () => {
+  if (viewer.scene.mode === SceneMode.SCENE2D) viewer.camera.zoomOut(viewer.camera.positionCartographic.height * 0.35);
+  else viewer.camera.zoomOut();
+};
 
 // Clic en el terreno → mover al astronauta ahí
 const clickHandler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 clickHandler.setInputAction((click: ScreenSpaceEventHandler.PositionedEvent) => {
   if (animating) return;
+  if (placing) {
+    const picked = viewer.scene.mode === SceneMode.SCENE2D
+      ? viewer.camera.pickEllipsoid(click.position, MARS_REFERENCE)
+      : viewer.scene.pickPositionSupported ? viewer.scene.pickPosition(click.position) : undefined;
+    if (!picked) return;
+    if (placing === "start") {
+      placeAstronaut(picked);
+    } else {
+      const point = Cartographic.fromCartesian(picked);
+      updateMissionDestination({
+        longitude: CesiumMath.toDegrees(point.longitude), latitude: CesiumMath.toDegrees(point.latitude),
+      });
+      targetEntity.position = new ConstantPositionProperty(picked);
+      targetEntity.show = true;
+      targetPhotoEntity.show = false;
+      document.querySelector<HTMLElement>("#mission-target-label")?.replaceChildren("Map destination");
+    }
+    setPlacing();
+    return;
+  }
     // Si hizo clic en la miniatura, abrir la foto grande en vez de mover al astronauta
   const pickedObject = viewer.scene.pick(click.position);
   if (boxwork.selectPicked(pickedObject?.id)) return;
@@ -527,9 +655,6 @@ clickHandler.setInputAction((click: ScreenSpaceEventHandler.PositionedEvent) => 
     return;
   }
 
-  if (!viewer.scene.pickPositionSupported) return;
-  const picked = viewer.scene.pickPosition(click.position);
-  if (picked) placeAstronaut(picked);
 }, ScreenSpaceEventType.LEFT_CLICK);
 // SUPUESTO: velocidad media caminando con traje y equipo. Acordar el valor con el equipo.
 const WALK_SPEED_KMH = 2;
@@ -588,6 +713,8 @@ function drawRoute(route: Coordinate[], isDemo: boolean): void {
   }
 
   const km = distanceM / 1000;
+  const distanceLabel = distanceM < 1000 ? distanceM.toFixed(1) + " m" : km.toFixed(2) + " km";
+  mapRouteStatus.textContent = (isDemo ? "Demo route" : "USGS DEM route") + " · " + distanceLabel;
   const oneWayH = km / WALK_SPEED_KMH;
   const roundTripH = oneWayH * 2; // tiene que volver a la base con oxígeno
   const limit = currentMission?.evaMaxHours;
@@ -597,8 +724,9 @@ function drawRoute(route: Coordinate[], isDemo: boolean): void {
   const afterDusk = returnHour > 18;
 
     setResult(
-    (isDemo ? "DEMO ROUTE (not computed by the planner yet) · " : "") +
-      `Distance ${km.toFixed(2)} km · One-way ≈ ${oneWayH.toFixed(1)} h · ` +
+    (isDemo ? "DEMO ROUTE · " : "USGS DEM ROUTE · ") +
+      `Distance ${distanceLabel} · ` +
+      `One-way ≈ ${distanceM < 1000 ? (oneWayH * 60).toFixed(1) + " min" : oneWayH.toFixed(1) + " h"} · ` +
       `Round trip ≈ ${roundTripH.toFixed(1)} h · O₂ needed ≈ ${o2NeededH.toFixed(1)} h` +
       (limit !== undefined ? ` / EVA limit ${limit} h` : "") +
       (withinLimit ? "" : " · ⚠ NOT ENOUGH O₂") +
@@ -608,13 +736,22 @@ function drawRoute(route: Coordinate[], isDemo: boolean): void {
     isDemo || !withinLimit || afterDusk ? "warning" : "info"
   );
   // Encuadrar la ruta completa
-  const sphere = BoundingSphere.fromPoints(
-    route.map((p) => Cartesian3.fromDegrees(p.longitude, p.latitude, GALE_SURFACE_HEIGHT_M))
-  );
-  viewer.camera.flyToBoundingSphere(sphere, {
-    offset: new HeadingPitchRange(0, CesiumMath.toRadians(-50), sphere.radius * 3),
-    duration: 2,
-  });
+  if (viewer.scene.mode === SceneMode.SCENE2D) {
+    const bounds = Rectangle.fromCartesianArray(positions, MARS_REFERENCE);
+    const margin = Math.max(bounds.width * 0.25, bounds.height * 0.25, CesiumMath.toRadians(0.00025));
+    viewer.camera.flyTo({
+      destination: new Rectangle(bounds.west - margin, bounds.south - margin, bounds.east + margin, bounds.north + margin),
+      duration: 0.75,
+    });
+  } else {
+    const sphere = BoundingSphere.fromPoints(
+      route.map((p) => Cartesian3.fromDegrees(p.longitude, p.latitude, GALE_SURFACE_HEIGHT_M))
+    );
+    viewer.camera.flyToBoundingSphere(sphere, {
+      offset: new HeadingPitchRange(0, CesiumMath.toRadians(-50), sphere.radius * 3),
+      duration: 2,
+    });
+  }
   
   prepareTraverse(route, oneWayH);
 }
@@ -668,6 +805,7 @@ function startTraverse(): void {
   animating = true;
   traverseButton.disabled = true;
   planButton.disabled = true;
+  mapPlanButton.disabled = true;
   missionSelect.disabled = true;
 
   const astronautPosition = new ConstantPositionProperty(traverse.positions[0]);
@@ -703,6 +841,7 @@ function finishTraverse(point: Cartesian3, turnedBack: boolean, elapsedH: number
   renderTelemetry(telemetryAt(elapsedH, false));
   animating = false;
   planButton.disabled = false;
+  mapPlanButton.disabled = false;
   missionSelect.disabled = false;
 
   // El astronauta queda donde terminó

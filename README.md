@@ -21,8 +21,9 @@ uv run uvicorn main:app --app-dir src --reload
 Endpoints: `GET /`, `GET /api/health`, `GET /api/mission`,
 `GET /api/mission/raster?path=...`, and `POST /api/mission/plan`.
 
-The route planner deliberately returns `not_implemented` until a validated Mars DEM,
-coordinate convention, and route-cost model are integrated.
+The route planner estimates paths inside the local Mount Sharp DEM. The map
+opens in 2D with public NASA Mars Trek imagery. See the Boxwork data guide for
+the optional local imagery and route coverage.
 
 ## Frontend
 

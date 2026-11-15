@@ -1,7 +1,7 @@
 import {
   BoundingSphere, Cartesian2, Cartesian3, Color, ConstantProperty, HeadingPitchRange,
   ClassificationType, GeographicTilingScheme, HeightReference, HorizontalOrigin,
-  ImageryLayer, Rectangle, UrlTemplateImageryProvider,
+  ImageryLayer, Rectangle, SceneMode, UrlTemplateImageryProvider,
   type Cesium3DTileset, type Entity, type Viewer,
 } from "cesium";
 import type { Coordinate } from "./missions";
@@ -81,7 +81,6 @@ export function createBoxworkPanel(
   viewer: Viewer,
   panel: HTMLElement,
   apiBase: string,
-  marsReady: Promise<Cesium3DTileset | undefined>,
   onDestination: (site: Site) => void,
 ) {
   const api = apiBase + "/api/mission/boxwork";
@@ -90,7 +89,7 @@ export function createBoxworkPanel(
     <p class="boxwork-status" role="status"></p>
     <div class="boxwork-data" hidden>
       <div class="boxwork-controls">
-        <button type="button" class="boxwork-focus" disabled>Focus study area</button>
+        <button type="button" class="boxwork-focus">Focus study area</button>
         <label><input type="checkbox" class="boxwork-slope" disabled> Show slope</label>
       </div>
       <ul class="boxwork-legend" aria-label="Slope in degrees" hidden></ul>
@@ -126,8 +125,8 @@ export function createBoxworkPanel(
   let siteButtons: HTMLButtonElement[] = [];
   let markers: Entity[] = [];
   let transect: Entity;
+  let tileset: Cesium3DTileset | undefined;
   let layer: ImageryLayer | undefined;
-  let loadingLayer: Promise<void> | undefined;
   let dataset: BoxworkAnalysis;
 
   function selectSite(index: number): void {
@@ -143,6 +142,10 @@ export function createBoxworkPanel(
   }
 
   function focusArea(): void {
+    if (viewer.scene.mode === SceneMode.SCENE2D) {
+      viewer.camera.flyTo({ destination: rectangle, duration: 0.85 });
+      return;
+    }
     const profile = dataset.profile;
     const points = dataset.sites.map((site, index) => Cartesian3.fromDegrees(site.longitude, site.latitude,
       (index === 0 ? profile.samples[0] : profile.samples.at(-1))?.elevation_m ?? 0));
@@ -167,12 +170,12 @@ export function createBoxworkPanel(
       show: false,
       point: {
         pixelSize: 11, color: Color.WHITE, outlineColor: Color.BLACK, outlineWidth: 2,
-        heightReference: HeightReference.RELATIVE_TO_3D_TILE,
+        heightReference: HeightReference.CLAMP_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
         text: site.name, font: "13px sans-serif", showBackground: true,
-        heightReference: HeightReference.RELATIVE_TO_3D_TILE,
+        heightReference: HeightReference.CLAMP_TO_GROUND,
         pixelOffset: new Cartesian2(14, site.landform === "ridge" ? 16 : -16),
         horizontalOrigin: HorizontalOrigin.LEFT,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -185,7 +188,7 @@ export function createBoxworkPanel(
         positions: data.sites.map((site) => Cartesian3.fromDegrees(site.longitude, site.latitude)),
         width: 3,
         clampToGround: true,
-        classificationType: ClassificationType.CESIUM_3D_TILE,
+        classificationType: ClassificationType.BOTH,
         material: Color.WHITE,
       },
     });
@@ -220,40 +223,48 @@ export function createBoxworkPanel(
   }
 
   focus.onclick = focusArea;
-  toggle.onchange = () => {
+  function showSlope(): void {
     updateLayerVisibility();
-    if (!toggle.checked || layer || loadingLayer) return;
-    status.textContent = "Loading slope layer…";
-    loadingLayer = marsReady.then((tileset) => {
-      if (!tileset) throw new Error("Cesium Mars is unavailable.");
-      const provider = new UrlTemplateImageryProvider({
-        url: api + "/slope.png",
+    if (!active || !toggle.checked || !dataset || layer) return;
+    const collection = tileset?.imageryLayers ?? viewer.imageryLayers;
+    const provider = new UrlTemplateImageryProvider({
+      url: api + "/slope.png",
+      rectangle,
+      credit: dataset.dem_credit,
+      tilingScheme: new GeographicTilingScheme({
         rectangle,
-        credit: dataset.dem_credit,
-        tilingScheme: new GeographicTilingScheme({
-          rectangle, ellipsoid: MARS_REFERENCE, numberOfLevelZeroTilesX: 1, numberOfLevelZeroTilesY: 1,
-        }),
-        // The 3D Tiles draper in Cesium 1.147 treats maximumLevel as exclusive.
-        maximumLevel: 1,
-      });
-      const slopeLayer = new ImageryLayer(provider, { rectangle, alpha: 0.65 });
-      tileset.imageryLayers.add(slopeLayer);
-      layer = slopeLayer;
-      provider.errorEvent.addEventListener(() => {
-        if (layer !== slopeLayer) return;
-        toggle.checked = false;
-        if (tileset.imageryLayers.contains(slopeLayer)) tileset.imageryLayers.remove(slopeLayer);
-        layer = undefined;
-        updateLayerVisibility();
-        status.textContent = "Slope image unavailable. Use the 2D terrain analysis or retry.";
-      });
-      updateLayerVisibility();
-      status.textContent = "";
-    }).catch(() => {
+        ellipsoid: MARS_REFERENCE,
+        numberOfLevelZeroTilesX: 1,
+        numberOfLevelZeroTilesY: 1,
+      }),
+      // The 3D Tiles draper in Cesium 1.147 treats maximumLevel as exclusive.
+      maximumLevel: tileset ? 1 : 0,
+    });
+    const slopeLayer = new ImageryLayer(provider, { rectangle, alpha: 0.65 });
+    collection.add(slopeLayer);
+    layer = slopeLayer;
+    status.textContent = "";
+    provider.errorEvent.addEventListener(() => {
+      if (layer !== slopeLayer) return;
       toggle.checked = false;
-      status.textContent = "Slope layer unavailable. Use the 2D terrain analysis or retry.";
-    }).finally(() => { loadingLayer = undefined; });
-  };
+      collection.remove(slopeLayer);
+      layer = undefined;
+      updateLayerVisibility();
+      status.textContent = "Slope image unavailable. Use the 2D terrain analysis or retry.";
+    });
+    updateLayerVisibility();
+  }
+
+  toggle.onchange = showSlope;
+
+  function setSurface(surface?: Cesium3DTileset): void {
+    if (surface === tileset) return;
+    if (layer) (tileset?.imageryLayers ?? viewer.imageryLayers).remove(layer);
+    layer = undefined;
+    tileset = surface;
+    showSlope();
+    if (active && dataset) focusArea();
+  }
 
   let activation = 0;
   async function setActive(visible: boolean): Promise<void> {
@@ -282,14 +293,11 @@ export function createBoxworkPanel(
     content.hidden = false;
     selectSite(0);
     status.textContent = "";
-    const tileset = await marsReady;
-    if (current !== activation) return;
-    markers.forEach((marker) => { marker.show = Boolean(tileset); });
-    transect.show = Boolean(tileset);
-    toggle.disabled = !tileset;
-    focus.disabled = !tileset;
-    if (tileset) focusArea();
-    else status.textContent = "Cesium Mars is unavailable. The stop details and profile are still available.";
+    markers.forEach((marker) => { marker.show = true; });
+    transect.show = true;
+    toggle.disabled = false;
+    showSlope();
+    focusArea();
   }
 
   function selectPicked(entity: unknown): boolean {
@@ -301,5 +309,5 @@ export function createBoxworkPanel(
     return true;
   }
 
-  return { setActive, selectPicked };
+  return { setActive, selectPicked, setSurface };
 }

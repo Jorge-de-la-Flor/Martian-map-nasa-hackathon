@@ -93,3 +93,16 @@ footer { height: 34px; flex: 0 0 34px; display: flex; justify-content: space-bet
 .boxwork-legend li { display: flex; align-items: center; gap: 4px; }
 .boxwork-legend span { display: inline-block; width: 10px; height: 10px; border: 1px solid #b9c3cb70; border-radius: 2px; }
 .boxwork-chart { display: block; width: 100%; height: auto; }
+.map-tools { position: absolute; z-index: 4; top: 74px; left: 16px; max-width: min(300px, calc(100% - 32px)); padding: 8px; background: #0b1117ed; border: 1px solid var(--line); border-radius: 9px; }
+.map-tool-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.map-tool-row + .map-tool-row { margin-top: 5px; }
+.map-tools button { padding: 6px 8px; border: 1px solid #526270; border-radius: 5px; color: #edf1f4; background: #192630; cursor: pointer; font-size: 12px; }
+.map-tools button[aria-pressed="true"] { border-color: var(--accent); color: #ffc29f; }
+.map-tools button:disabled { opacity: .5; cursor: default; }
+.map-route-tools select { width: auto; padding: 5px; font-size: 12px; }
+.map-route-tools button { color: #ffc29f; border-color: var(--accent); }
+.map-tools p { margin: 6px 0 0; color: #b8c5d0; font-size: 11px; }
+.map-tools p:empty { display: none; }
+@media (max-width: 850px) {
+  .telemetry { top: auto; bottom: 8px; right: 8px; width: 180px; }
+}
