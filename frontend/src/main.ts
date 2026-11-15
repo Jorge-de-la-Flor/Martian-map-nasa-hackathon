@@ -4,10 +4,10 @@ import "./style.css";
 import {
   BoundingSphere, Cartesian3, Cartographic, Cesium3DTileset, Color, ConstantPositionProperty,
   ConstantProperty, Ellipsoid, EllipsoidGeodesic, HeadingPitchRange, HeightReference, Ion,
-  Math as CesiumMath, PinBuilder, PolylineDashMaterialProperty, ScreenSpaceEventHandler,
+  Math as CesiumMath, PinBuilder, PolylineDashMaterialProperty,PolylineGlowMaterialProperty, ScreenSpaceEventHandler,
   ScreenSpaceEventType, VerticalOrigin, Viewer,
 } from "cesium";
-import { HABITAT, MISSIONS, type Mission } from "./missions";
+import { HABITAT, MISSIONS, type Coordinate, type Mission } from "./missions";
 
 // Configuración de Cesium para Marte
 (window as any).CESIUM_BASE_URL = "/cesiumStatic";
@@ -142,36 +142,36 @@ async function requestPlan(): Promise<void> {
   planButton.disabled = true;
   planButton.textContent = "ANALYZING…";
   try {
-    const profile = document.querySelector<HTMLSelectElement>("#profile")!
-      .value as RouteProfile;
+    const profile = document.querySelector<HTMLSelectElement>("#profile")!.value as RouteProfile;
     const payload = {
-      start: {
-        longitude: readNumber("start-lon"),
-        latitude: readNumber("start-lat"),
-      },
-      destination: {
-        longitude: readNumber("end-lon"),
-        latitude: readNumber("end-lat"),
-      },
-      profile,
+      start: { longitude: readNumber("start-lon"), latitude: readNumber("start-lat") },
+      destination: { longitude: readNumber("end-lon"), latitude: readNumber("end-lat") },
+      profile
     };
-    const response = await fetch(`${API_BASE_URL}/api/mission/plan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = (await response.json()) as PlanResponse | { detail: string };
-    if (!response.ok)
-      throw new Error(
-        "detail" in data ? data.detail : `HTTP ${response.status}`,
-      );
-    const plan = data as PlanResponse;
-    setResult(plan.message, plan.status === "planned" ? "info" : "warning");
+
+    // 1) Pedir la ruta al backend
+    let plan: PlanResponse | null = null;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/mission/plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json() as PlanResponse | { detail: string };
+      if (!response.ok) throw new Error("detail" in data ? data.detail : `HTTP ${response.status}`);
+      plan = data as PlanResponse;
+    } catch (apiError) {
+      console.warn("Planner API unavailable, using demo route:", apiError);
+    }
+
+    // 2) Ruta real si existe; si no, ruta de ejemplo (DEMO)
+    if (plan && plan.status === "planned" && plan.route.length > 1) {
+      drawRoute(plan.route, false);
+    } else {
+      drawRoute(buildDemoRoute(), true);
+    }
   } catch (error) {
-    setResult(
-      error instanceof Error ? error.message : "Unexpected error.",
-      "error",
-    );
+    setResult(error instanceof Error ? error.message : "Unexpected error.", "error");
   } finally {
     planButton.disabled = false;
     planButton.textContent = "REQUEST ROUTE ANALYSIS";
@@ -251,6 +251,8 @@ function renderBrief(mission: Mission): void {
 }
 
 function selectMission(mission: Mission): void {
+  currentMission = mission;
+
   const { longitude, latitude } = mission.target;
   renderBrief(mission);
 
@@ -263,6 +265,10 @@ function selectMission(mission: Mission): void {
   targetEntity.show = true;
   targetCartesian = Cartesian3.fromDegrees(longitude, latitude);
   updatePreview();
+  const oldRoute = viewer.entities.getById("planned-route");
+  if (oldRoute) oldRoute.show = false;
+  if (!targetCartesian) return;
+
   viewer.camera.flyToBoundingSphere(
     new BoundingSphere(Cartesian3.fromDegrees(longitude, latitude, GALE_SURFACE_HEIGHT_M), 1500),
     { offset: new HeadingPitchRange(0, CesiumMath.toRadians(-35), 9000), duration: 2.5 }
@@ -375,22 +381,99 @@ function placeAstronaut(cartesian: Cartesian3): void {
   updatePreview();
 }
 
+// ---------- Ruta ----------
+
 // Inicio en la base
-pla
+placeAstronaut(astronautCartesian);
+setResult("Select a mission, then click on the terrain to place the astronaut.", "info");
 
+// Clic en el terreno → mover al astronauta ahí
+const clickHandler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+clickHandler.setInputAction((click: ScreenSpaceEventHandler.PositionedEvent) => {
+  if (!viewer.scene.pickPositionSupported) return;
+  const picked = viewer.scene.pickPosition(click.position);
+  if (picked) placeAstronaut(picked);
+}, ScreenSpaceEventType.LEFT_CLICK);
+// SUPUESTO: velocidad media caminando con traje y equipo. Acordar el valor con el equipo.
+const WALK_SPEED_KMH = 2;
 
+let currentMission: Mission | null = null;
 
+const routeEntity = viewer.entities.add({
+  id: "planned-route",
+  name: "Planned route",
+  show: false,
+  polyline: {
+    positions: [],
+    width: 8,
+    clampToGround: true,
+    material: new PolylineGlowMaterialProperty({ color: Color.fromCssColorString("#f08a4b"), glowPower: 0.25 }),
+  },
+});
 
+// Ruta de EJEMPLO: curva suave entre astronauta y objetivo (NO evalúa el terreno)
+function buildDemoRoute(): Coordinate[] {
+  if (!targetCartesian) throw new Error("Select a mission first.");
+  const a = Cartographic.fromCartesian(astronautCartesian);
+  const b = Cartographic.fromCartesian(targetCartesian);
+  const start = { lon: CesiumMath.toDegrees(a.longitude), lat: CesiumMath.toDegrees(a.latitude) };
+  const end = { lon: CesiumMath.toDegrees(b.longitude), lat: CesiumMath.toDegrees(b.latitude) };
+  const dLon = end.lon - start.lon;
+  const dLat = end.lat - start.lat;
 
+  const points: Coordinate[] = [];
+  const steps = 30;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const bend = Math.sin(Math.PI * t) * 0.2; // desvío lateral
+    points.push({
+      longitude: start.lon + dLon * t - dLat * bend,
+      latitude: start.lat + dLat * t + dLon * bend,
+    });
+  }
+  return points;
+}
 
+function drawRoute(route: Coordinate[], isDemo: boolean): void {
+  const positions = route.map((p) => Cartesian3.fromDegrees(p.longitude, p.latitude));
+  routeEntity.polyline!.positions = new ConstantProperty(positions);
+  routeEntity.show = true;
+  previewLine.show = false;
 
+  // Distancia total sumando cada tramo
+  let distanceM = 0;
+  for (let i = 1; i < route.length; i++) {
+    distanceM += new EllipsoidGeodesic(
+      Cartographic.fromDegrees(route[i - 1].longitude, route[i - 1].latitude),
+      Cartographic.fromDegrees(route[i].longitude, route[i].latitude),
+      Ellipsoid.MARS
+    ).surfaceDistance;
+  }
 
+  const km = distanceM / 1000;
+  const oneWayH = km / WALK_SPEED_KMH;
+  const roundTripH = oneWayH * 2; // tiene que volver a la base con oxígeno
+  const limit = currentMission?.evaMaxHours;
+  const withinLimit = limit === undefined || roundTripH <= limit;
 
+  setResult(
+    (isDemo ? "DEMO ROUTE (not computed by the planner yet) · " : "") +
+      `Distance ${km.toFixed(2)} km · One-way ≈ ${oneWayH.toFixed(1)} h · ` +
+      `Round trip ≈ ${roundTripH.toFixed(1)} h` +
+      (limit !== undefined ? ` / EVA limit ${limit} h` : "") +
+      (withinLimit ? "" : " · ⚠ EXCEEDS EVA LIMIT"),
+    isDemo || !withinLimit ? "warning" : "info"
+  );
 
-
-
-
-
+  // Encuadrar la ruta completa
+  const sphere = BoundingSphere.fromPoints(
+    route.map((p) => Cartesian3.fromDegrees(p.longitude, p.latitude, GALE_SURFACE_HEIGHT_M))
+  );
+  viewer.camera.flyToBoundingSphere(sphere, {
+    offset: new HeadingPitchRange(0, CesiumMath.toRadians(-50), sphere.radius * 3),
+    duration: 2,
+  });
+}
 
 
 
