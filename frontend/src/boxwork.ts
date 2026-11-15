@@ -4,12 +4,13 @@ import {
   ImageryLayer, Rectangle, SceneMode, UrlTemplateImageryProvider,
   type Cesium3DTileset, type Entity, type Viewer,
 } from "cesium";
+import type { Extent } from "./gale-basemap";
 import type { Coordinate } from "./missions";
 import { MARS_REFERENCE } from "./mars-coordinates";
 
-interface Site extends Coordinate {
+export interface BoxworkSite extends Coordinate {
   name: string;
-  landform: string;
+  landform: "hollow" | "ridge";
   waypoint_sol: number;
   reported_sample_minerals: string;
   science_source: string;
@@ -22,10 +23,10 @@ interface Profile {
   samples: { distance_m: number; elevation_m: number | null }[];
 }
 
-interface BoxworkAnalysis {
-  sites: Site[];
+export interface BoxworkAnalysis {
+  sites: BoxworkSite[];
   slope: {
-    bounds_mars_degrees: { west: number; south: number; east: number; north: number };
+    bounds_mars_degrees: Extent;
     legend: { label: string; color: string }[];
   };
   dem_source: string;
@@ -33,6 +34,22 @@ interface BoxworkAnalysis {
   waypoint_credit: string;
   mineralogy_source: string;
   profile: Profile;
+}
+
+export const sampleColors = { hollow: "#ffd276", ridge: "#78e0aa" };
+
+function sampleMarker(color: string): HTMLCanvasElement {
+  const marker = document.createElement("canvas");
+  marker.width = marker.height = 24;
+  const context = marker.getContext("2d")!;
+  context.beginPath();
+  context.arc(12, 12, 9, 0, Math.PI * 2);
+  context.fillStyle = color;
+  context.fill();
+  context.lineWidth = 3;
+  context.strokeStyle = "#152028";
+  context.stroke();
+  return marker;
 }
 
 const meters = (value: number | null) => value === null ? "—" : value.toFixed(2) + " m";
@@ -81,7 +98,8 @@ export function createBoxworkPanel(
   viewer: Viewer,
   panel: HTMLElement,
   apiBase: string,
-  onDestination: (site: Site) => void,
+  onDestination: (site: BoxworkSite, initial: boolean) => void,
+  onSamples: (analysis: BoxworkAnalysis) => void,
 ) {
   const api = apiBase + "/api/mission/boxwork";
   panel.innerHTML = `
@@ -129,16 +147,16 @@ export function createBoxworkPanel(
   let layer: ImageryLayer | undefined;
   let dataset: BoxworkAnalysis;
 
-  function selectSite(index: number): void {
+  function selectSite(index: number, initial = false): void {
     const site = dataset.sites[index];
     siteButtons.forEach((button, i) => button.setAttribute("aria-pressed", String(i === index)));
     markers.forEach((marker, i) => {
-      marker.point!.color = new ConstantProperty(i === index ? Color.fromCssColorString("#ffad83") : Color.WHITE);
+      marker.billboard!.scale = new ConstantProperty(i === index ? 1.3 : 1);
     });
     detail.textContent = site.landform + " · " + site.reported_sample_minerals
       + " · rover position, sol " + site.waypoint_sol + " · " + dataset.waypoint_credit;
     siteSource.href = site.science_source;
-    onDestination(site);
+    onDestination(site, initial);
   }
 
   function focusArea(): void {
@@ -166,10 +184,10 @@ export function createBoxworkPanel(
     rectangle = Rectangle.fromDegrees(west, south, east, north);
     markers = data.sites.map((site) => viewer.entities.add({
       name: site.name,
-      position: Cartesian3.fromDegrees(site.longitude, site.latitude, 3),
+      position: Cartesian3.fromDegrees(site.longitude, site.latitude),
       show: false,
-      point: {
-        pixelSize: 11, color: Color.WHITE, outlineColor: Color.BLACK, outlineWidth: 2,
+      billboard: {
+        image: sampleMarker(sampleColors[site.landform]), width: 14, height: 14,
         heightReference: HeightReference.CLAMP_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
@@ -214,6 +232,7 @@ export function createBoxworkPanel(
     metrics.textContent = meters(profile.distance_m) + " · ascent " + meters(profile.ascent_m)
       + " · descent " + meters(profile.descent_m);
     drawProfile(chart, profile);
+    onSamples(data);
     return data;
   }
 
@@ -291,7 +310,7 @@ export function createBoxworkPanel(
     }
     if (current !== activation) return;
     content.hidden = false;
-    selectSite(0);
+    selectSite(0, true);
     status.textContent = "";
     markers.forEach((marker) => { marker.show = true; });
     transect.show = true;

@@ -36,6 +36,18 @@ npm run dev
 Open the Vite URL printed in the terminal. Set `VITE_API_BASE_URL` in
 `frontend/.env` if the API is not at `http://127.0.0.1:8000`.
 
+### Boxwork preview alongside another checkout
+
+From this checkout, run the API and frontend in two terminals:
+
+```bash
+uv run uvicorn main:app --app-dir src --port 8103
+npm --prefix frontend run dev:boxwork
+```
+
+Open `http://127.0.0.1:5103`. This mode sends the frontend's API requests to
+port 8103. Use the prepared local DEM and analysis files described in the data guide.
+
 ## Raster inspection
 Place a raster under `data/`. The API only accepts files inside the configured data
 directory. Inspection reports metadata; it does not assume a raster is a Mars dataset.

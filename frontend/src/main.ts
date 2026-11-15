@@ -9,6 +9,7 @@ import {
 } from "cesium";
 import { HABITAT, MISSIONS, type Coordinate, type Mission } from "./missions";
 import { createBoxworkPanel } from "./boxwork";
+import { createMineralView } from "./boxwork-minerals";
 import { MARS_REFERENCE } from "./mars-coordinates";
 import { addGaleImagery } from "./gale-basemap";
 import {
@@ -45,7 +46,7 @@ function flyToGale(duration = 3): void {
 type RouteProfile = "direct" | "low_slope" | "conservative";
 
 interface PlanResponse {
-  status: string;
+  status: "planned" | "outside_coverage" | "no_path" | "not_implemented";
   profile: RouteProfile;
   message: string;
   route: Array<{ longitude: number; latitude: number }>;
@@ -107,6 +108,7 @@ app.innerHTML = `
         <a id="boxwork-preview" class="terrain-link" href="/api/mission/boxwork/preview">Open Mount Sharp terrain analysis</a>
       </aside>
       <section class="map-panel" aria-label="3D globe">
+        <div class="map-stage">
         <div id="cesium-container"></div>
         <div class="map-tools" aria-label="Map controls">
           <div class="map-tool-row">
@@ -128,6 +130,9 @@ app.innerHTML = `
             </select>
             <button type="button" id="map-plan">Draw route</button>
           </div>
+          <div class="map-tool-row" id="map-science-tools" hidden>
+            <button type="button" id="map-science" aria-controls="site-photo">Boxwork science</button>
+          </div>
           <p id="map-instructions" role="status">Drag to pan · scroll to zoom</p>
           <p id="map-route-status" role="status"></p>
         </div>
@@ -141,14 +146,25 @@ app.innerHTML = `
           <div class="tm-row" id="tm-radiation"><span>Est. radiation dose</span><strong>—</strong><em>RAD</em></div>
           <a class="telemetry-source" href="https://www.nasa.gov/news-release/nasa-rover-results-include-first-age-measurement-on-mars-and-help-for-human-exploration/">RAD reference · Gale, 2012–13</a>
         </div>
-                <div id="site-photo" class="site-photo" hidden>
-          <button id="site-photo-close" class="site-photo-close" aria-label="Close">×</button>
-          <img id="site-photo-img" alt="" />
-          <p class="eyebrow">ARRIVAL VIEW · REAL IMAGE</p>
-          <p id="site-photo-caption"></p>
-          <p id="site-photo-credit" class="site-photo-credit"></p>
-        </div>
         <div class="map-overlay"><span class="eyebrow">GALE CRATER</span><span class="map-caption" id="map-caption">Loading NASA imagery…</span></div>
+        </div>
+        <section id="site-photo" class="site-photo" aria-labelledby="site-photo-title" hidden>
+          <header>
+            <h3 id="site-photo-title"></h3>
+            <button type="button" id="site-photo-close" class="site-photo-close" aria-label="Close site card">×</button>
+          </header>
+          <div id="science-views" class="science-views" role="group" aria-label="Boxwork view" hidden>
+            <button type="button" id="show-site-image" aria-pressed="true" aria-controls="site-image-view">Rover photo</button>
+            <button type="button" id="show-minerals" aria-pressed="false" aria-controls="site-mineral-view" disabled>Minerals</button>
+          </div>
+          <div id="site-image-view">
+            <img id="site-photo-img" alt="" />
+            <p id="site-photo-caption"></p>
+            <a id="site-photo-source" class="terrain-link"></a>
+            <p id="site-photo-credit" class="site-photo-credit"></p>
+          </div>
+          <div id="site-mineral-view" hidden></div>
+        </section>
       </section>
     </section>
     <footer><span>MARTIAN MAP / NASA SPACE APPS CONCEPT</span><span>PROTOTYPE BUILD 0.1.0</span></footer>
@@ -158,6 +174,8 @@ app.innerHTML = `
 const apiStatus = document.querySelector<HTMLSpanElement>("#api-status")!;
 const planButton = document.querySelector<HTMLButtonElement>("#plan-button")!;
 const mapPlanButton = document.querySelector<HTMLButtonElement>("#map-plan")!;
+const scienceTools = document.querySelector<HTMLDivElement>("#map-science-tools")!;
+const openScienceButton = document.querySelector<HTMLButtonElement>("#map-science")!;
 const mapRouteStatus = document.querySelector<HTMLParagraphElement>("#map-route-status")!;
 const resultBox = document.querySelector<HTMLDivElement>("#plan-result")!;
 const mapCaption = document.querySelector<HTMLSpanElement>("#map-caption")!;
@@ -199,7 +217,9 @@ async function checkApi(): Promise<void> {
 function readNumber(id: string): number {
   const input = document.querySelector<HTMLInputElement>(`#${id}`)!;
   const value = Number(input.value);
-  if (!Number.isFinite(value)) throw new Error(`Invalid value for ${id}`);
+  if (input.value === "" || !Number.isFinite(value)) {
+    throw new Error("Set a start and destination before drawing a route.");
+  }
   return value;
 }
 
@@ -217,27 +237,36 @@ async function requestPlan(): Promise<void> {
       profile
     };
 
-    // 1) Pedir la ruta al backend
-    let plan: PlanResponse | null = null;
+    let plan: PlanResponse | undefined;
+    let validationMessage: string | undefined;
     try {
       const response = await fetch(`${API_BASE_URL}/api/mission/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+      if (!response.headers.get("content-type")?.includes("application/json")) {
+        throw new Error("The API did not return a route response.");
+      }
       const data = await response.json() as PlanResponse | { detail: string };
-      if (!response.ok) throw new Error("detail" in data ? data.detail : `HTTP ${response.status}`);
-      plan = data as PlanResponse;
+      if (!response.ok) {
+        if (response.status === 422) {
+          validationMessage = "detail" in data && typeof data.detail === "string"
+            ? data.detail : "Check the start and destination coordinates.";
+        }
+      } else {
+        plan = data as PlanResponse;
+      }
     } catch (apiError) {
-      console.warn("Planner API unavailable, using demo route:", apiError);
+      console.warn("Planner request failed:", apiError);
     }
 
     if (revision !== previewRevision) return;
-    // 2) Ruta real si existe; si no, ruta de ejemplo (DEMO)
     if (plan && plan.status === "planned" && plan.route.length > 1) {
       drawRoute(plan.route, false);
     } else if (currentMission?.id === "boxwork") {
-      const message = plan?.message ?? "Route service unavailable. The dashed line is the direct preview.";
+      const serviceHint = "Boxwork terrain planner unavailable. Check the local API and Mount Sharp elevation model.";
+      const message = validationMessage ?? (plan?.status === "not_implemented" ? serviceHint : plan?.message ?? serviceHint);
       setResult(message, "warning");
       mapRouteStatus.textContent = message;
     } else {
@@ -416,11 +445,15 @@ const boxwork = createBoxworkPanel(
   viewer,
   document.querySelector<HTMLElement>("#boxwork-analysis")!,
   API_BASE_URL,
-  (site) => {
-    if (animating) return;
+  (site, initial) => {
+    if (animating || (initial && targetCartesian)) return;
     targetEntity.show = false;
     document.querySelector<HTMLElement>("#mission-target-label")!.textContent = site.name;
     updateMissionDestination(site);
+  },
+  (analysis) => {
+    mineralView.setSamples(analysis);
+    showMinerals.disabled = false;
   },
 );
 
@@ -428,12 +461,22 @@ function selectMission(mission: Mission): void {
   currentMission = mission;
   resetTelemetry();
   renderBrief(mission);
-  updateMissionDestination(mission.target);
-
   const isBoxwork = mission.id === "boxwork";
-  if (isBoxwork) placeAstronaut(Cartesian3.fromDegrees(BOXWORK_START.longitude, BOXWORK_START.latitude));
   targetEntity.show = !isBoxwork;
   targetPhotoEntity.show = false;
+  scienceTools.hidden = !isBoxwork;
+  setScienceView(false);
+  if (isBoxwork) {
+    targetCartesian = null;
+    document.querySelector<HTMLInputElement>("#end-lon")!.value = "";
+    document.querySelector<HTMLInputElement>("#end-lat")!.value = "";
+    document.querySelector<HTMLElement>("#mission-target-label")!.textContent = "Curiosity sample site";
+    placeAstronaut(Cartesian3.fromDegrees(BOXWORK_START.longitude, BOXWORK_START.latitude));
+    setResult("Choose a Curiosity sample site or set a destination on the map.");
+    showSitePhoto(mission);
+  } else {
+    updateMissionDestination(mission.target);
+  }
   void boxwork.setActive(isBoxwork);
   if (isBoxwork) return;
 
@@ -547,11 +590,12 @@ function updatePreview(): void {
   mapRouteStatus.textContent = "";
   const oldRoute = viewer.entities.getById("planned-route");
   if (oldRoute) oldRoute.show = false;
-  document.querySelector<HTMLDivElement>("#site-photo")!.hidden = true;
+  mineralView.setRoute([]);
+  if (currentMission?.id !== "boxwork") sitePhoto.hidden = true;
   document.querySelector<HTMLButtonElement>("#traverse-button")!.disabled = true;
+  previewLine.show = Boolean(targetCartesian);
   if (!targetCartesian) return;
   previewLine.polyline!.positions = new ConstantProperty([astronautCartesian, targetCartesian]);
-  previewLine.show = true;
 
   const distanceM = new EllipsoidGeodesic(
     Cartographic.fromCartesian(astronautCartesian),
@@ -577,10 +621,6 @@ function placeAstronaut(cartesian: Cartesian3): void {
 }
 
 // ---------- Ruta ----------
-
-// Inicio en la base
-placeAstronaut(astronautCartesian);
-setResult("Select a mission or use the map controls to set your start and destination.", "info");
 
 const mapTools = {
   start: document.querySelector<HTMLButtonElement>("#map-set-start")!,
@@ -715,6 +755,10 @@ function drawRoute(route: Coordinate[], isDemo: boolean): void {
   const km = distanceM / 1000;
   const distanceLabel = distanceM < 1000 ? distanceM.toFixed(1) + " m" : km.toFixed(2) + " km";
   mapRouteStatus.textContent = (isDemo ? "Demo route" : "USGS DEM route") + " · " + distanceLabel;
+  if (!isDemo && currentMission?.id === "boxwork") {
+    mineralView.setRoute(route);
+    showSitePhoto(currentMission);
+  }
   const oneWayH = km / WALK_SPEED_KMH;
   const roundTripH = oneWayH * 2; // tiene que volver a la base con oxígeno
   const limit = currentMission?.evaMaxHours;
@@ -738,7 +782,7 @@ function drawRoute(route: Coordinate[], isDemo: boolean): void {
   // Encuadrar la ruta completa
   if (viewer.scene.mode === SceneMode.SCENE2D) {
     const bounds = Rectangle.fromCartesianArray(positions, MARS_REFERENCE);
-    const margin = Math.max(bounds.width * 0.25, bounds.height * 0.25, CesiumMath.toRadians(0.00025));
+    const margin = Math.max(bounds.width * 0.25, bounds.height * 0.25, CesiumMath.toRadians(0.00065));
     viewer.camera.flyTo({
       destination: new Rectangle(bounds.west - margin, bounds.south - margin, bounds.east + margin, bounds.north + margin),
       duration: 0.75,
@@ -883,18 +927,52 @@ traverseButton.addEventListener("click", startTraverse);
 
 
 // ---------- Foto real del lugar al llegar ----------
-const sitePhoto = document.querySelector<HTMLDivElement>("#site-photo")!;
+const sitePhoto = document.querySelector<HTMLElement>("#site-photo")!;
+const sitePhotoTitle = document.querySelector<HTMLHeadingElement>("#site-photo-title")!;
 const sitePhotoImg = document.querySelector<HTMLImageElement>("#site-photo-img")!;
 const sitePhotoCaption = document.querySelector<HTMLParagraphElement>("#site-photo-caption")!;
 const sitePhotoCredit = document.querySelector<HTMLParagraphElement>("#site-photo-credit")!;
+const sitePhotoSource = document.querySelector<HTMLAnchorElement>("#site-photo-source")!;
+const scienceViews = document.querySelector<HTMLElement>("#science-views")!;
+const imageView = document.querySelector<HTMLElement>("#site-image-view")!;
+const mineralsPanel = document.querySelector<HTMLElement>("#site-mineral-view")!;
+const showImage = document.querySelector<HTMLButtonElement>("#show-site-image")!;
+const showMinerals = document.querySelector<HTMLButtonElement>("#show-minerals")!;
+const mineralView = createMineralView(mineralsPanel);
+
+function setScienceView(minerals: boolean): void {
+  sitePhoto.classList.toggle("site-photo--minerals", minerals);
+  imageView.hidden = minerals;
+  mineralsPanel.hidden = !minerals;
+  showImage.setAttribute("aria-pressed", String(!minerals));
+  showMinerals.setAttribute("aria-pressed", String(minerals));
+  if (minerals) mineralView.draw();
+}
 
 function showSitePhoto(mission: Mission): void {
+  const isBoxwork = mission.id === "boxwork";
+  scienceViews.hidden = !isBoxwork;
+  sitePhoto.classList.toggle("site-photo--boxwork", isBoxwork);
+  sitePhotoTitle.textContent = isBoxwork ? "Boxwork science" : mission.target.label;
   sitePhotoImg.src = mission.photo.src;
   sitePhotoImg.alt = mission.photo.caption;
   sitePhotoCaption.textContent = mission.photo.caption;
   sitePhotoCredit.textContent = `Image: ${mission.photo.credit}`;
+  sitePhotoSource.hidden = !mission.photo.source;
+  if (mission.photo.source) {
+    sitePhotoSource.href = mission.photo.source;
+    sitePhotoSource.textContent = "NASA image source";
+  }
   sitePhoto.hidden = false;
 }
+
+showImage.onclick = () => setScienceView(false);
+showMinerals.onclick = () => setScienceView(true);
+openScienceButton.onclick = () => {
+  if (currentMission?.id !== "boxwork") return;
+  showSitePhoto(currentMission);
+  sitePhoto.scrollIntoView({ block: "nearest" });
+};
 
 document.querySelector<HTMLButtonElement>("#site-photo-close")!
   .addEventListener("click", () => { sitePhoto.hidden = true; });
@@ -960,6 +1038,6 @@ function resetTelemetry(): void {
 evaStartSelect.addEventListener("change", resetTelemetry);
 resetTelemetry();
 
-
-
+placeAstronaut(astronautCartesian);
+setResult("Select a mission or use the map controls to set your start and destination.");
 void checkApi();

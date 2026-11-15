@@ -12,7 +12,7 @@ export interface Mission {
   equipment: Array<{ item: string; massKg: number }>;
   evaMaxHours: number; // tiempo máximo de caminata (oxígeno)
   difficulty: "Low" | "Medium" | "High";
-  photo: { src: string; caption: string; credit: string }; 
+  photo: { src: string; caption: string; credit: string; source?: string };
 }
 
 // Base del astronauta: sitio de aterrizaje de Curiosity
@@ -38,10 +38,11 @@ export const MISSIONS: Mission[] = [
     ],
     evaMaxHours: 6,
     difficulty: "High",
-        photo: {
+    photo: {
       src: "/missions/boxwork.jpg",
       caption: "Curiosity's Mastcam view of a curb-like boxwork ridge on Mount Sharp (PIA26558).",
       credit: "NASA/JPL-Caltech/MSSS",
+      source: "https://science.nasa.gov/photojournal/curiosity-views-a-fractured-boxwork-pattern-up-close/",
     },
   },
   {

@@ -4,7 +4,7 @@ import { viteStaticCopy } from "vite-plugin-static-copy";
 const cesiumSource = "node_modules/cesium/Build/Cesium";
 const cesiumBaseUrl = "cesiumStatic";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   define: {
     CESIUM_BASE_URL: JSON.stringify(`/${cesiumBaseUrl}`),
   },
@@ -19,13 +19,14 @@ export default defineConfig({
     }),
   ],
   server: {
-    host: "0.0.0.0",
-    port: 5173,
+    host: mode === "boxwork" ? "127.0.0.1" : "0.0.0.0",
+    port: mode === "boxwork" ? 5103 : 5173,
+    strictPort: mode === "boxwork",
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: mode === "boxwork" ? "http://127.0.0.1:8103" : "http://127.0.0.1:8000",
         changeOrigin: true,
       },
     },
   },
-});
+}));

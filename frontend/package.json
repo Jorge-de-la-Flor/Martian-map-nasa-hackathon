@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:boxwork": "vite --mode boxwork",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
