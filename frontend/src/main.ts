@@ -523,7 +523,7 @@ const zoneHint = viewer.entities.add({
   position: zoneHintPosition(),
   label: {
     text: "EXPLORABLE AREA · USGS 1 m terrain\nClick inside the blue zone ▶\nto place the astronaut",
-    font: "bold 13px sans-serif",
+    font: window.matchMedia("(max-width: 600px)").matches ? "bold 10px sans-serif" : "bold 13px sans-serif",
     fillColor: Color.fromCssColorString("#bfe3f7"),
     showBackground: true,
     backgroundColor: Color.fromCssColorString("#0c121a").withAlpha(0.85),
@@ -1129,6 +1129,8 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
 
 const CARD_W = 210, CARD_HEADER = 42, CARD_PHOTO = 118, CARD_ARROW = 14;
 const CARD_H = CARD_HEADER + CARD_PHOTO + CARD_ARROW;
+// En pantallas pequeñas (celular) las tarjetas del mapa se dibujan más pequeñas
+const CARD_SCALE = window.matchMedia("(max-width: 600px)").matches ? 0.7 : 1;
 
 function drawSiteCard(site: SampleSite, img: HTMLImageElement | null): HTMLCanvasElement {
   const s = 2; // dibujar al doble para que se vea nítido
@@ -1217,8 +1219,8 @@ async function buildSampleSites(): Promise<void> {
       position,
       billboard: {
         image: drawSiteCard(site, img),
-        width: CARD_W,
-        height: CARD_H,
+        width: CARD_W * CARD_SCALE,
+        height: CARD_H * CARD_SCALE,
         verticalOrigin: VerticalOrigin.BOTTOM,
         horizontalOrigin: site.side === "left" ? HorizontalOrigin.RIGHT
           : site.side === "right" ? HorizontalOrigin.LEFT : HorizontalOrigin.CENTER,
@@ -1272,8 +1274,8 @@ void loadImage(HABITAT_CARD.photo).then((img) => {
     position: Cartesian3.fromDegrees(HABITAT.longitude, HABITAT.latitude),
     billboard: {
       image: drawSiteCard(HABITAT_CARD, img),
-      width: CARD_W * 0.7, // más pequeña que las de los sitios
-      height: CARD_H * 0.7,
+      width: CARD_W * 0.7 * CARD_SCALE, // más pequeña que las de los sitios
+      height: CARD_H * 0.7 * CARD_SCALE,
       verticalOrigin: VerticalOrigin.BOTTOM,
       pixelOffset: new Cartesian2(0, -46), // encima del pin "H"
       heightReference: HeightReference.CLAMP_TO_GROUND,
@@ -1281,5 +1283,16 @@ void loadImage(HABITAT_CARD.photo).then((img) => {
     },
   });
 });
+
+// ---------- Celular: llevar la vista al mapa después de cada acción ----------
+const mobileQuery = window.matchMedia("(max-width: 850px)");
+function scrollToMapOnMobile(): void {
+  if (mobileQuery.matches) {
+    document.querySelector("#cesium-container")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+planButton.addEventListener("click", scrollToMapOnMobile);
+traverseButton.addEventListener("click", scrollToMapOnMobile);
+missionSelect.addEventListener("change", scrollToMapOnMobile);
 
 void checkApi();
