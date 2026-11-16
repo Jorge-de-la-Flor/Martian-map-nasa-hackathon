@@ -73,3 +73,12 @@ footer { height: 34px; flex: 0 0 34px; display: flex; justify-content: space-bet
 .tm-row[data-level="ok"] strong { color: #6fd08c; }
 .tm-row[data-level="warn"] strong { color: #f0c24b; }
 .tm-row[data-level="danger"] strong { color: #f06b5b; }
+
+/* Perfil de elevación de la ruta */
+.route-profile canvas { display: block; width: 100%; height: auto; margin-top: 6px; }
+.route-profile .profile-legend { margin: 6px 0 0; font-size: 10px; color: var(--muted); }
+
+/* Perfil de elevación flotando sobre el mapa (abajo a la izquierda, sobre los créditos de Cesium) */
+.route-profile { position: absolute; left: 16px; bottom: 40px; z-index: 9; width: 340px; padding: 10px 12px; background: rgba(12, 18, 26, .9); border: 1px solid var(--line); border-radius: 10px; }
+.route-profile .eyebrow { margin: 0 0 4px; }
+.route-profile p { margin: 4px 0 0; font-size: 11px; color: #c5d0d8; }

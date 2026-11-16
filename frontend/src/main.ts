@@ -126,7 +126,13 @@ app.innerHTML = `
           <div class="tm-row" id="tm-pressure"><span>Pressure</span><strong>—</strong><em>REMS</em></div>
           <div class="tm-row" id="tm-radiation"><span>Radiation dose</span><strong>—</strong><em>RAD</em></div>
         </div>
-                <div id="site-photo" class="site-photo" hidden>
+                <div id="route-profile" class="route-profile" hidden>
+          <p class="eyebrow">ELEVATION PROFILE · REAL TERRAIN</p>
+          <canvas id="profile-chart" width="620" height="300" role="img" aria-label="Elevation profile of the planned route"></canvas>
+          <p id="profile-caption" class="muted"></p>
+          <p class="profile-legend">Line color = slope: <span style="color:#7fb3d5">&lt;5°</span> · <span style="color:#65a39e">5–10°</span> · <span style="color:#e8bb69">10–20°</span> · <span style="color:#e46549">≥20°</span></p>
+        </div>
+        <div id="site-photo" class="site-photo" hidden>
           <button id="site-photo-close" class="site-photo-close" aria-label="Close">×</button>
           <img id="site-photo-img" alt="" />
           <p class="eyebrow">ARRIVAL VIEW · REAL IMAGE</p>
@@ -228,8 +234,10 @@ async function requestPlan(): Promise<void> {
     // 2) Ruta real si el backend respondió; si está apagado, ruta DEMO
     if (plan && plan.status === "planned" && plan.route_geo.length > 1) {
       drawRoute(plan.route_geo, false, plan.metrics);
+      showElevationProfile(plan.elevation_profile, plan.metrics);
     } else {
       drawRoute(buildDemoRoute(), true);
+      hideElevationProfile();
     }
   } catch (error) {
     setResult(error instanceof Error ? error.message : "Unexpected error.", "error");
@@ -523,6 +531,7 @@ const previewLine = viewer.entities.add({
 });
 
 function updatePreview(): void {
+  hideElevationProfile();
   document.querySelector<HTMLDivElement>("#site-photo")!.hidden = true;
   document.querySelector<HTMLButtonElement>("#traverse-button")!.disabled = true;
   const oldRoute = viewer.entities.getById("planned-route");
@@ -883,9 +892,88 @@ function resetTelemetry(): void {
 evaStartSelect.addEventListener("change", resetTelemetry);
 resetTelemetry();
 
+// ---------- Perfil de elevación de la ruta real ----------
+// Basado en el gráfico de perfil de Steven (rama mapa-de-minerales-y-pendientes),
+// ahora alimentado con elevation_profile del planificador A*.
+type ElevationSample = GeoPlanResponse["elevation_profile"][number];
 
+function slopeColor(deg: number): string {
+  if (deg >= 20) return "#e46549"; // empinado
+  if (deg >= 10) return "#e8bb69";
+  if (deg >= 5) return "#65a39e";
+  return "#7fb3d5"; // casi plano
+}
 
+function hideElevationProfile(): void {
+  document.querySelector<HTMLDivElement>("#route-profile")!.hidden = true;
+}
 
+function showElevationProfile(samples: ElevationSample[], metrics: RouteMetrics): void {
+  const box = document.querySelector<HTMLDivElement>("#route-profile")!;
+  const canvas = document.querySelector<HTMLCanvasElement>("#profile-chart")!;
+  const caption = document.querySelector<HTMLParagraphElement>("#profile-caption")!;
+  const ctx = canvas.getContext("2d");
+  if (!ctx || samples.length < 2) return;
+  box.hidden = false;
 
+  // Área de dibujo lógica 310x150 (el canvas es 2x para que se vea nítido)
+  const W = 310, H = 150, left = 46, right = 8, top = 10, bottom = 22;
+  const total = samples[samples.length - 1].distance_m || 1;
+  const heights = samples.map((s) => s.elevation_m);
+  const floor = Math.min(...heights);
+  const range = Math.max(Math.max(...heights) - floor, 1);
+  const x = (d: number) => left + (d / total) * (W - left - right);
+  const y = (e: number) => top + (1 - (e - floor) / range) * (H - top - bottom);
+
+  ctx.setTransform(2, 0, 0, 2, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "10px system-ui";
+  ctx.lineWidth = 1;
+
+  // Líneas guía y etiquetas de elevación
+  for (const e of [floor, floor + range / 2, floor + range]) {
+    ctx.strokeStyle = "#2c3b48";
+    ctx.beginPath();
+    ctx.moveTo(left, y(e));
+    ctx.lineTo(W - right, y(e));
+    ctx.stroke();
+    ctx.fillStyle = "#b6c3cd";
+    ctx.textAlign = "right";
+    ctx.fillText(`${Math.round(e)} m`, left - 4, y(e) + 3);
+  }
+  ctx.textAlign = "left";
+  ctx.fillText("0 m", left, H - 6);
+  ctx.textAlign = "right";
+  ctx.fillText(`${(total / 1000).toFixed(2)} km`, W - right, H - 6);
+
+  // Relleno bajo la curva
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(floor));
+  for (const s of samples) ctx.lineTo(x(s.distance_m), y(s.elevation_m));
+  ctx.lineTo(x(total), y(floor));
+  ctx.closePath();
+  ctx.fillStyle = "rgba(240, 138, 75, 0.12)";
+  ctx.fill();
+
+  // Línea coloreada según la pendiente de cada tramo
+  const step = Math.max(1, Math.floor(samples.length / 400));
+  const indices: number[] = [];
+  for (let i = 0; i < samples.length; i += step) indices.push(i);
+  if (indices[indices.length - 1] !== samples.length - 1) indices.push(samples.length - 1);
+  ctx.lineWidth = 2;
+  for (let k = 1; k < indices.length; k++) {
+    const a = samples[indices[k - 1]];
+    const b = samples[indices[k]];
+    ctx.strokeStyle = slopeColor(b.slope_deg);
+    ctx.beginPath();
+    ctx.moveTo(x(a.distance_m), y(a.elevation_m));
+    ctx.lineTo(x(b.distance_m), y(b.elevation_m));
+    ctx.stroke();
+  }
+
+  caption.textContent =
+    `↑ ${Math.round(metrics.ascent_m)} m · ↓ ${Math.round(metrics.descent_m)} m · ` +
+    `max slope ${metrics.max_slope_deg.toFixed(0)}° · mean ${metrics.mean_slope_deg.toFixed(1)}°`;
+}
 
 void checkApi();
