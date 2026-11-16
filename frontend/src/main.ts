@@ -35,12 +35,24 @@ function flyToGale(duration = 3): void {
 
 type RouteProfile = "direct" | "low_slope" | "conservative";
 
-interface PlanResponse {
-  status: string;
+// Respuesta de POST /api/mission/plan/geo (A* sobre el DEM real de Gale)
+interface RouteMetrics {
+  distance_m: number;
+  ascent_m: number;
+  descent_m: number;
+  max_slope_deg: number;
+  mean_slope_deg: number;
+  duration_s: number | null;
+}
+
+interface GeoPlanResponse {
+  status: "planned";
   profile: RouteProfile;
   message: string;
-  route: Array<{ longitude: number; latitude: number }>;
-  distance_m: number | null;
+  route_geo: Array<{ longitude: number; latitude: number; elevation_m: number; slope_deg: number }>;
+  elevation_profile: Array<{ distance_m: number; elevation_m: number; slope_deg: number }>;
+  metrics: RouteMetrics;
+  limitations: string[];
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -189,24 +201,33 @@ async function requestPlan(): Promise<void> {
       );
     }
 
-    // 1) Pedir la ruta al backend
-    let plan: PlanResponse | null = null;
+    // 1) Pedir la ruta real al backend (A* sobre el DEM de Gale)
+    let plan: GeoPlanResponse | null = null;
+    let response: Response | null = null;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/mission/plan`, {
+      response = await fetch(`${API_BASE_URL}/api/mission/plan/geo`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...payload, walking_speed_m_s: WALK_SPEED_KMH / 3.6 }),
       });
-      const data = await response.json() as PlanResponse | { detail: string };
-      if (!response.ok) throw new Error("detail" in data ? data.detail : `HTTP ${response.status}`);
-      plan = data as PlanResponse;
-    } catch (apiError) {
-      console.warn("Planner API unavailable, using demo route:", apiError);
+    } catch (networkError) {
+      console.warn("Planner API unreachable, using demo route:", networkError);
     }
 
-    // 2) Ruta real si existe; si no, ruta de ejemplo (DEMO)
-    if (plan && plan.status === "planned" && plan.route.length > 1) {
-      drawRoute(plan.route, false);
+    if (response) {
+      const data = (await response.json()) as GeoPlanResponse | { detail: unknown };
+      if (!response.ok) {
+        // El backend respondió pero rechazó la ruta: mostrar el motivo (no dibujar DEMO)
+        const detail =
+          "detail" in data && typeof data.detail === "string" ? data.detail : `HTTP ${response.status}`;
+        throw new Error(`⚠ PLANNER · ${detail}`);
+      }
+      plan = data as GeoPlanResponse;
+    }
+
+    // 2) Ruta real si el backend respondió; si está apagado, ruta DEMO
+    if (plan && plan.status === "planned" && plan.route_geo.length > 1) {
+      drawRoute(plan.route_geo, false, plan.metrics);
     } else {
       drawRoute(buildDemoRoute(), true);
     }
@@ -260,7 +281,7 @@ viewer.homeButton.viewModel.command.beforeExecute.addEventListener((event) => {
 
 //  Misiones 
 // Altura aproximada del terreno en esta zona de Gale (solo para encuadrar la cámara)
-const GALE_SURFACE_HEIGHT_M = -4000;
+const GALE_SURFACE_HEIGHT_M = -3550; // boxwork ≈ -3610 m, Nazca ≈ -3488 m (DEM USGS)
 
 const missionSelect = document.querySelector<HTMLSelectElement>("#mission")!;
 const missionBrief = document.querySelector<HTMLDivElement>("#mission-brief")!;
@@ -363,14 +384,21 @@ function selectMission(mission: Mission): void {
     })
     .catch((error) => console.error("Could not load site photo:", error));
   targetCartesian = Cartesian3.fromDegrees(longitude, latitude);
-  updatePreview();
+
+  // El rover presurizado deja al astronauta dentro del área con datos de terreno
+  placeAstronaut(Cartesian3.fromDegrees(mission.roverDrop.longitude, mission.roverDrop.latitude));
     
  
 
-  viewer.camera.flyToBoundingSphere(
-    new BoundingSphere(Cartesian3.fromDegrees(longitude, latitude, GALE_SURFACE_HEIGHT_M), 1500),
-    { offset: new HeadingPitchRange(0, CesiumMath.toRadians(-35), 9000), duration: 2.5 }
-  );
+  // Encuadrar el punto de bajada del rover y el objetivo
+  const missionArea = BoundingSphere.fromPoints([
+    Cartesian3.fromDegrees(mission.roverDrop.longitude, mission.roverDrop.latitude, GALE_SURFACE_HEIGHT_M),
+    Cartesian3.fromDegrees(longitude, latitude, GALE_SURFACE_HEIGHT_M),
+  ]);
+  viewer.camera.flyToBoundingSphere(missionArea, {
+    offset: new HeadingPitchRange(0, CesiumMath.toRadians(-40), Math.max(missionArea.radius * 4, 1500)),
+    duration: 2.5,
+  });
     
 }
 
@@ -430,26 +458,43 @@ viewer.entities.add({
 
 
 
-// Zona de estudio: relleno azul suave + borde punteado sobre el terreno
-const { west, south, east, north } = STUDY_ZONE;
-viewer.entities.add({
+// Zona de estudio = área con datos de elevación (se actualiza con /api/mission/coverage)
+function zoneOutline(): Cartesian3[] {
+  const { west, south, east, north } = STUDY_ZONE;
+  return Cartesian3.fromDegreesArray([west, south, east, south, east, north, west, north, west, south]);
+}
+
+const zoneFill = viewer.entities.add({
   name: STUDY_ZONE.label,
   rectangle: {
-    coordinates: Rectangle.fromDegrees(west, south, east, north),
+    coordinates: Rectangle.fromDegrees(STUDY_ZONE.west, STUDY_ZONE.south, STUDY_ZONE.east, STUDY_ZONE.north),
     material: Color.fromCssColorString("#4fa3d9").withAlpha(0.08),
   },
 });
-viewer.entities.add({
+const zoneBorder = viewer.entities.add({
   name: `${STUDY_ZONE.label} border`,
   polyline: {
-    positions: Cartesian3.fromDegreesArray([
-      west, south, east, south, east, north, west, north, west, south,
-    ]),
+    positions: zoneOutline(),
     width: 2,
     clampToGround: true,
     material: new PolylineDashMaterialProperty({ color: Color.fromCssColorString("#4fa3d9"), dashLength: 20 }),
   },
 });
+
+// Pedir al backend el área exacta con datos y ajustar la zona
+async function loadCoverage(): Promise<void> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mission/coverage`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const c = (await response.json()) as { west: number; south: number; east: number; north: number };
+    Object.assign(STUDY_ZONE, { west: c.west, south: c.south, east: c.east, north: c.north });
+    zoneFill.rectangle!.coordinates = new ConstantProperty(Rectangle.fromDegrees(c.west, c.south, c.east, c.north));
+    zoneBorder.polyline!.positions = new ConstantProperty(zoneOutline());
+  } catch (error) {
+    console.warn("Coverage unavailable, using the built-in study zone:", error);
+  }
+}
+void loadCoverage();
 
 // Astronauta (empieza en la base)
 const astronautEntity = viewer.entities.add({
@@ -584,24 +629,30 @@ function buildDemoRoute(): Coordinate[] {
   return points;
 }
 
-function drawRoute(route: Coordinate[], isDemo: boolean): void {
+function drawRoute(route: Coordinate[], isDemo: boolean, metrics?: RouteMetrics): void {
   const positions = route.map((p) => Cartesian3.fromDegrees(p.longitude, p.latitude));
   routeEntity.polyline!.positions = new ConstantProperty(positions);
   routeEntity.show = true;
   previewLine.show = false;
 
-  // Distancia total sumando cada tramo
-  let distanceM = 0;
-  for (let i = 1; i < route.length; i++) {
-    distanceM += new EllipsoidGeodesic(
-      Cartographic.fromDegrees(route[i - 1].longitude, route[i - 1].latitude),
-      Cartographic.fromDegrees(route[i].longitude, route[i].latitude),
-      Ellipsoid.MARS
-    ).surfaceDistance;
+  // Distancia: la del planificador (terreno real) o, en DEMO, sumando cada tramo
+  let distanceM = metrics?.distance_m ?? 0;
+  if (!metrics) {
+    for (let i = 1; i < route.length; i++) {
+      distanceM += new EllipsoidGeodesic(
+        Cartographic.fromDegrees(route[i - 1].longitude, route[i - 1].latitude),
+        Cartographic.fromDegrees(route[i].longitude, route[i].latitude),
+        Ellipsoid.MARS
+      ).surfaceDistance;
+    }
   }
 
   const km = distanceM / 1000;
-  const oneWayH = km / WALK_SPEED_KMH;
+  const oneWayH = metrics?.duration_s ? metrics.duration_s / 3600 : km / WALK_SPEED_KMH;
+  const terrain = metrics
+    ? ` · ↑ ${Math.round(metrics.ascent_m)} m ↓ ${Math.round(metrics.descent_m)} m · max slope ${metrics.max_slope_deg.toFixed(0)}°` +
+      (metrics.max_slope_deg > 25 ? " ⚠ steep segment" : "")
+    : "";
   const roundTripH = oneWayH * 2; // tiene que volver a la base con oxígeno
   const limit = currentMission?.evaMaxHours;
     const o2NeededH = roundTripH * o2Multiplier(missionLoadKg()); // con el peso del equipo
@@ -610,8 +661,8 @@ function drawRoute(route: Coordinate[], isDemo: boolean): void {
   const afterDusk = returnHour > 18;
 
     setResult(
-    (isDemo ? "DEMO ROUTE (not computed by the planner yet) · " : "") +
-      `Distance ${km.toFixed(2)} km · One-way ≈ ${oneWayH.toFixed(1)} h · ` +
+    (isDemo ? "DEMO ROUTE (planner offline) · " : "REAL TERRAIN ROUTE (USGS 1 m DEM) · ") +
+      `Distance ${km.toFixed(2)} km${terrain} · One-way ≈ ${oneWayH.toFixed(1)} h · ` +
       `Round trip ≈ ${roundTripH.toFixed(1)} h · O₂ needed ≈ ${o2NeededH.toFixed(1)} h` +
       (limit !== undefined ? ` / EVA limit ${limit} h` : "") +
       (withinLimit ? "" : " · ⚠ NOT ENOUGH O₂") +
