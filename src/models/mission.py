@@ -176,3 +176,39 @@ class DataCatalogResponse(StrictModel):
     region_status: Literal["not_selected", "selected"]
     layers: list[LayerInfo]
     available_categories: list[str]
+
+
+
+# ---------- Modelos en longitud/latitud (puente para el frontend) ----------
+class GeoCoordinate(StrictModel):
+    longitude: float = Field(ge=-180, le=360)
+    latitude: float = Field(ge=-90, le=90)
+
+
+class GeoPlanRequest(StrictModel):
+    start: GeoCoordinate
+    destination: GeoCoordinate
+    profile: RouteProfile = "low_slope"
+    max_slope_deg: float | None = Field(default=None, gt=0, le=90)
+    walking_speed_m_s: float | None = Field(default=None, gt=0)
+
+
+class GeoRoutePoint(StrictModel):
+    longitude: float
+    latitude: float
+    elevation_m: float
+    slope_deg: float = Field(ge=0, le=90)
+
+
+class GeoPlanResponse(PlanResponse):
+    route_geo: list[GeoRoutePoint]
+
+
+class CoverageResponse(StrictModel):
+    region_name: str | None
+    dem_path: str
+    crs: str
+    west: float
+    south: float
+    east: float
+    north: float
