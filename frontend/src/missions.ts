@@ -9,6 +9,7 @@ export interface Mission {
   objective: string;
   science: string;
   target: Coordinate & { label: string };
+  roverDrop: Coordinate & { label: string }; // donde el rover presurizado deja al astronauta
   equipment: Array<{ item: string; massKg: number }>;
   evaMaxHours: number; // tiempo máximo de caminata (oxígeno)
   difficulty: "Low" | "Medium" | "High";
@@ -30,7 +31,9 @@ export const MISSIONS: Mission[] = [
     science:
       "Boxwork ridges formed where ancient groundwater left minerals in rock fractures. " +
       "Curiosity found clay minerals in a ridge and carbonates in a hollow.",
-    target: { label: "Boxwork region, Mount Sharp (approx.)", longitude: 137.39, latitude: -4.8 },
+    // Waypoint real de Curiosity (NASA/JPL-Caltech), sol 4711: cresta "Nevado Sajama"
+    target: { label: "Nevado Sajama · boxwork ridge (sol 4711)", longitude: 137.3810041, latitude: -4.80800755 },
+    roverDrop: { label: "Rover drop-off", longitude: 137.388, latitude: -4.814 },
     equipment: [
       { item: "Sampling kit", massKg: 8 },
       { item: "Hand drill", massKg: 12 },
@@ -50,7 +53,9 @@ export const MISSIONS: Mission[] = [
     objective: "Photograph and sample the 'discs and needles' crystal block at the Nazca drill site.",
     science:
       "Crystal-shaped lumps in the sulfate layer of Mount Sharp record how water dried out on Mars.",
-    target: { label: "Nazca drill site, Mount Sharp", longitude: 137.3876, latitude: -4.8247 },
+    // Posición de Curiosity en el sol 5045 (mapa de ubicación de la NASA)
+    target: { label: "Nazca drill site (sol 5045)", longitude: 137.3876111, latitude: -4.8246694 },
+    roverDrop: { label: "Rover drop-off", longitude: 137.382, latitude: -4.818 },
     equipment: [
       { item: "Sampling kit", massKg: 8 },
       { item: "Macro camera", massKg: 2 },
@@ -65,13 +70,14 @@ export const MISSIONS: Mission[] = [
   },
   ];
 
-  // Zona de estudio permitida: Gale, desde Bradbury Landing hasta las faldas de Mount Sharp
+// Zona de estudio = área con datos de elevación (DEM USGS de 1 m, Mount Sharp).
+// Estos valores son el respaldo; al iniciar se actualizan con /api/mission/coverage.
 export const STUDY_ZONE = {
-  label: "Gale crater study zone",
-  west: 137.30,
-  east: 137.50,
-  south: -4.90,
-  north: -4.52,
+  label: "Gale DEM coverage · 1 m (Mount Sharp)",
+  west: 137.37846,
+  east: 137.39014,
+  south: -4.8272,
+  north: -4.80531,
 };
 
 export function isInsideZone(longitude: number, latitude: number): boolean {

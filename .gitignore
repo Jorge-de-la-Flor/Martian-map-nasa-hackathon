@@ -25,3 +25,6 @@ data/**/*.ovr
 # Preserve scientific catalog and documentation
 !data/catalog.json
 !data/README.md
+
+# Capas generadas por scripts/build_boxwork_layers.py
+data/boxwork/

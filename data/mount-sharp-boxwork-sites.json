@@ -1,0 +1,42 @@
+{
+  "region": "Mount Sharp, Gale crater",
+  "coordinate_convention": "Planetocentric Mars latitude; east-positive longitude in degrees",
+  "coordinate_role": "Published rover waypoint near the science target",
+  "waypoint_source": "https://mars.nasa.gov/mmgis-maps/MSL/Layers/json/MSL_waypoints.json",
+  "waypoint_credit": "NASA/JPL-Caltech",
+  "mineralogy_source": "https://www.jpl.nasa.gov/news/nasas-curiosity-rover-sees-martian-spiderwebs-up-close/",
+  "sites": [
+    {
+      "id": "valle-de-la-luna",
+      "name": "Valle de la Luna",
+      "landform": "hollow",
+      "longitude": 137.3810353,
+      "latitude": -4.80783916,
+      "waypoint_sol": 4687,
+      "waypoint_rmc": "119_1722",
+      "reported_sample_minerals": "Carbonate minerals",
+      "science_source": "https://science.nasa.gov/blog/curiosity-blog-sols-4689-4694-drill-in-the-boxwork-unit/"
+    },
+    {
+      "id": "nevado-sajama",
+      "name": "Nevado Sajama",
+      "landform": "ridge",
+      "longitude": 137.3810041,
+      "latitude": -4.80800755,
+      "waypoint_sol": 4711,
+      "waypoint_rmc": "120_82",
+      "reported_sample_minerals": "Clay minerals",
+      "science_source": "https://science.nasa.gov/blog/curiosity-blog-sols-4716-4722-drilling-success-at-nevado-sajama/"
+      },
+    {
+      "id": "nazca",
+      "name": "Nazca drill site",
+      "landform": "block",
+      "longitude": 137.3876111,
+      "latitude": -4.8246694,
+      "waypoint_sol": 5045,
+      "reported_sample_minerals": "Disc-shaped crystal forms (pending CheMin results)",
+      "science_source": "https://science.nasa.gov/blog/curiosity-blog-sols-5043-5049-preparing-to-drill-at-nazca/"
+    }
+  ]
+}

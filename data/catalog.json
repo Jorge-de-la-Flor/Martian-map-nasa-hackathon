@@ -1,9 +1,23 @@
 
 {
-  "_comment": "He dejado region como null por una razón: Gale y Jezero siguen siendo candidatas, y no quiero convertir una selección pendiente en una decisión que el equipo nunca tomó.",
+  "_comment": "Región seleccionada por el equipo: Gale crater (Mount Sharp). El DEM local se genera con scripts/prepare_boxwork_dem.py.",
   "schema_version": 1,
-  "region": null,
+ "region": { "name": "Gale crater · Mount Sharp" },
   "layers": [
+
+
+      {
+      "id": "gale_merged_dem_1m",
+      "name": "MSL Gale Merged DEM 1 m (Mount Sharp window)",
+      "category": "topographic",
+      "mission": "Mars Science Laboratory",
+      "instrument": "Merged orbital stereo DEM (USGS Astrogeology)",
+      "source_url": "https://astrogeology.usgs.gov/search/map/mars_msl_gale_merged_dem_1m",
+      "role": "route_dem",
+      "resolution_m": 1.0,
+      "local_path": "mount-sharp-boxwork-dem.tif",
+      "notes": "Window around Valle de la Luna, Nevado Sajama and Nazca, generated with scripts/prepare_boxwork_dem.py. Calef III and Parker (2016), NASA/JPL and USGS Astrogeology. Not stored in Git."
+    },
     {
       "id": "ctx_stereo_dtm",
       "name": "CTX Stereo Digital Terrain Model",

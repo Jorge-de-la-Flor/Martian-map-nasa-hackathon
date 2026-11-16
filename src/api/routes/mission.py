@@ -2,19 +2,25 @@ import mimetypes
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
-
+from math import isfinite
 from core.config import get_settings
 from geospatial.catalog import load_data_catalog
 from geospatial.raster import (
     inspect_raster,
     resolve_data_path,
 )
+from geospatial.geo import load_georeference
 from models.mission import (
+    CoverageResponse,
     DataCatalogResponse,
     ElevationResponse,
+    GeoPlanRequest,
+    GeoPlanResponse,
+    GeoRoutePoint,
     MissionInfo,
     PlanRequest,
     PlanResponse,
+    ProjectedCoordinate,
     RasterInfo,
 )
 from services.astar import NoPathError, PlanningLimitError
@@ -211,3 +217,120 @@ def plan_route(payload: PlanRequest) -> PlanResponse:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+
+
+
+# ---------- Puente para el frontend: longitud/latitud ----------
+def _route_dem() -> tuple[str, str | None]:
+    """Devuelve el DEM de rutas registrado en el catálogo y el nombre de la región."""
+    try:
+        catalog = load_data_catalog(settings.data_dir)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    layer = next(
+        (
+            item
+            for item in catalog.layers
+            if item.role == "route_dem" and item.available and item.local_path
+        ),
+        None,
+    )
+
+    if layer is None or layer.local_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "No route DEM is available. Run scripts/prepare_boxwork_dem.py "
+                "and register it in data/catalog.json."
+            ),
+        )
+
+    return layer.local_path, catalog.region_name
+
+
+def _load_route_georeference(dem_path: str):
+    try:
+        return load_georeference(resolve_data_path(settings.data_dir, dem_path))
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/coverage",
+    response_model=CoverageResponse,
+)
+def route_coverage() -> CoverageResponse:
+    """Rectángulo (en grados) donde hay datos de elevación para planificar rutas."""
+    dem_path, region_name = _route_dem()
+    geo = _load_route_georeference(dem_path)
+
+    return CoverageResponse(
+        region_name=region_name,
+        dem_path=dem_path,
+        crs=geo.crs.to_string(),
+        west=geo.west,
+        south=geo.south,
+        east=geo.east,
+        north=geo.north,
+    )
+
+
+@router.post(
+    "/plan/geo",
+    response_model=GeoPlanResponse,
+)
+def plan_route_geo(payload: GeoPlanRequest) -> GeoPlanResponse:
+    """Recibe longitud/latitud, usa el A* existente y devuelve la ruta también en longitud/latitud."""
+    dem_path, _ = _route_dem()
+    geo = _load_route_georeference(dem_path)
+
+    start_x, start_y = geo.to_projected.transform(
+        payload.start.longitude,
+        payload.start.latitude,
+    )
+    end_x, end_y = geo.to_projected.transform(
+        payload.destination.longitude,
+        payload.destination.latitude,
+    )
+
+    if not all(isfinite(value) for value in (start_x, start_y, end_x, end_y)):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The coordinates could not be converted to the DEM projection.",
+        )
+
+    # Reutiliza el endpoint original (mismo A*, mismos errores y mensajes)
+    plan = plan_route(
+        PlanRequest(
+            dem_path=dem_path,
+            start=ProjectedCoordinate(x_m=start_x, y_m=start_y),
+            destination=ProjectedCoordinate(x_m=end_x, y_m=end_y),
+            profile=payload.profile,
+            max_slope_deg=payload.max_slope_deg,
+            walking_speed_m_s=payload.walking_speed_m_s,
+        )
+    )
+
+    lons, lats = geo.to_geographic.transform(
+        [point.x_m for point in plan.route],
+        [point.y_m for point in plan.route],
+    )
+
+    route_geo = [
+        GeoRoutePoint(
+            longitude=float(lon),
+            latitude=float(lat),
+            elevation_m=point.elevation_m,
+            slope_deg=point.slope_deg,
+        )
+        for lon, lat, point in zip(lons, lats, plan.route)
+    ]
+
+    return GeoPlanResponse(**plan.model_dump(), route_geo=route_geo)
