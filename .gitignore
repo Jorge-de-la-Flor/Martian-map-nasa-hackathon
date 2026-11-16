@@ -28,3 +28,6 @@ data/**/*.ovr
 
 # Capas generadas por scripts/build_boxwork_layers.py
 data/boxwork/
+
+# Caché de compilación de TypeScript (npm run build)
+*.tsbuildinfo
