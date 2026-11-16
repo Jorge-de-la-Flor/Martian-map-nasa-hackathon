@@ -1,0 +1,70 @@
+
+{
+  "_comment": "Región seleccionada por el equipo: Gale crater (Mount Sharp). El DEM local se genera con scripts/prepare_boxwork_dem.py.",
+  "schema_version": 1,
+ "region": { "name": "Gale crater · Mount Sharp" },
+  "layers": [
+
+
+      {
+      "id": "gale_merged_dem_1m",
+      "name": "MSL Gale Merged DEM 1 m (Mount Sharp window)",
+      "category": "topographic",
+      "mission": "Mars Science Laboratory",
+      "instrument": "Merged orbital stereo DEM (USGS Astrogeology)",
+      "source_url": "https://astrogeology.usgs.gov/search/map/mars_msl_gale_merged_dem_1m",
+      "role": "route_dem",
+      "resolution_m": 1.0,
+      "local_path": "mount-sharp-boxwork-dem.tif",
+      "notes": "Window around Valle de la Luna, Nevado Sajama and Nazca, generated with scripts/prepare_boxwork_dem.py. Calef III and Parker (2016), NASA/JPL and USGS Astrogeology. Not stored in Git."
+    },
+    {
+      "id": "ctx_stereo_dtm",
+      "name": "CTX Stereo Digital Terrain Model",
+      "category": "topographic",
+      "mission": "Mars Reconnaissance Orbiter",
+      "instrument": "CTX",
+      "source_url": "https://stac.astrogeology.usgs.gov/docs/data/mars/ctxdtms/",
+      "role": "route_dem",
+      "resolution_m": 20.0,
+      "local_path": null,
+      "notes": "Local stereo terrain model. Coverage must be verified for the selected study area."
+    },
+    {
+      "id": "mola_megdr",
+      "name": "MOLA Mission Experiment Gridded Data Record",
+      "category": "topographic",
+      "mission": "Mars Global Surveyor",
+      "instrument": "MOLA",
+      "source_url": "https://pds-geosciences.wustl.edu/missions/mgs/megdr.html",
+      "role": "regional_context",
+      "resolution_m": 463.0,
+      "local_path": null,
+      "notes": "Global regional elevation context. Not suitable by itself for detailed human foot-placement planning."
+    },
+    {
+      "id": "ctx_optical_mosaic",
+      "name": "CTX Global Mosaic",
+      "category": "optical",
+      "mission": "Mars Reconnaissance Orbiter",
+      "instrument": "CTX",
+      "source_url": "https://murray-lab.caltech.edu/CTX/",
+      "role": "visual_context",
+      "resolution_m": 5.0,
+      "local_path": null,
+      "notes": "Optical imagery. It is not a digital elevation model."
+    },
+    {
+      "id": "themis_ir",
+      "name": "THEMIS Controlled Infrared Mosaic",
+      "category": "thermal",
+      "mission": "Mars Odyssey",
+      "instrument": "THEMIS",
+      "source_url": "https://registry.opendata.aws/nasa-usgs-themis-mosaics/",
+      "role": "thermal_context",
+      "resolution_m": 100.0,
+      "local_path": null,
+      "notes": "Infrared mosaic. Product type, band, units, and processing level must be checked before quantitative interpretation."
+    }
+  ]
+}
