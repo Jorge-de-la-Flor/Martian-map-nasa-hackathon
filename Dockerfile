@@ -15,6 +15,10 @@ RUN npm run build
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+# Librerías del sistema que necesita rasterio/GDAL (la imagen "slim" no las trae)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libexpat1 ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-dev
 COPY src ./src
