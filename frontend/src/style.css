@@ -98,3 +98,41 @@ footer { height: 34px; flex: 0 0 34px; display: flex; justify-content: space-bet
 
 /* Segundo interruptor de la tarjeta de capas */
 .layer-toggle-next { margin-top: 8px; }
+
+/* ================= RESPONSIVE ================= */
+/* Laptops pequeñas y tablets en horizontal */
+@media (max-width: 1100px) {
+  .workspace { grid-template-columns: 300px minmax(0, 1fr); }
+  .route-profile { width: 300px; }
+  .site-photo { width: 260px; }
+  .site-photo img { height: 140px; }
+}
+
+/* Tablets en vertical y celulares: el mapa va primero y el panel debajo */
+@media (max-width: 850px) {
+  .workspace { grid-template-columns: 1fr; gap: 12px; padding: 12px 0; }
+  .map-panel { order: -1; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: visible; border: 0; background: none; }
+  #cesium-container { position: relative; inset: auto; height: 62vh; min-height: 340px; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; scroll-margin-top: 8px; }
+  .map-overlay { display: none; }
+  .layers-card { top: 8px; left: 8px; width: auto; max-width: calc(50% - 12px); padding: 8px 10px; }
+  .layer-toggle { font-size: 10px; }
+  .telemetry { top: 48px; right: 8px; width: auto; min-width: 150px; max-width: calc(50% - 12px); padding: 8px 10px; }
+  .tm-row { grid-template-columns: 1fr auto; gap: 6px; font-size: 10px; }
+  .tm-row strong { font-size: 11px; }
+  .tm-row em { display: none; }
+  /* Gráfico y foto de llegada: debajo del mapa, a todo el ancho */
+  .route-profile, .site-photo { position: static; width: auto; }
+  .site-photo img { height: 180px; }
+  .panel { padding: 16px; overflow: visible; }
+}
+
+/* Celulares pequeños */
+@media (max-width: 420px) {
+  .shell { padding: 0 10px; }
+  .topbar h1 { font-size: 12px; letter-spacing: .12em; }
+  .system-status { font-size: 8px; }
+  #cesium-container { height: 58vh; }
+  .layers-card { max-width: calc(55% - 12px); }
+  .telemetry { min-width: 140px; }
+  footer { flex-direction: column; justify-content: center; gap: 2px; height: 44px; flex-basis: 44px; }
+}
