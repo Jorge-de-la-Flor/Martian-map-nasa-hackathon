@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mount Sharp terrain analysis | Martian Map</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #0b1117; color: #edf1f4; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; }
+    main { max-width: 1120px; margin: auto; padding: 32px 24px; }
+    h1 { margin: 4px 0 8px; font-size: clamp(28px, 5vw, 44px); letter-spacing: -.04em; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    p { line-height: 1.5; }
+    .muted, figcaption { color: #a8b6c2; font-size: 13px; }
+    .intro { margin: 0 0 22px; }
+    .area { color: #f0aa83; font-weight: 650; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 18px; align-items: start; }
+    .panel { border: 1px solid #2b3944; border-radius: 12px; background: #131d26; padding: 18px; margin: 0; }
+    .map-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .map-header label { font-size: 13px; }
+    .raster { position: relative; width: 100%; max-width: 500px; margin-inline: auto; background: #212f3b; border: 1px solid #384956; overflow: hidden; }
+    .raster img, .raster canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .raster img { image-rendering: pixelated; }
+    .north { position: absolute; top: 8px; left: 8px; padding: 4px 7px; background: #101920; font-size: 12px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 14px; list-style: none; margin: 12px 0; padding: 0; font-size: 12px; }
+    .legend li { display: flex; align-items: center; gap: 6px; }
+    .legend i { width: 12px; height: 12px; border: 1px solid #b9c3cb70; border-radius: 3px; }
+    .side { display: grid; gap: 16px; }
+    .sites { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .sites button { font: inherit; font-size: 13px; text-align: left; padding: 9px; color: #edf1f4; cursor: pointer; border: 1px solid #546572; border-radius: 7px; background: #192630; }
+    .sites button[aria-pressed="true"] { border-color: #f0aa83; color: #ffc19f; }
+    #site-detail { margin: 12px 0 8px; }
+    a { color: #f4ad87; }
+    :focus-visible { outline: 2px solid #ffb28a; outline-offset: 3px; }
+    .chart { display: block; width: 100%; height: 190px; }
+    .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 12px 0 0; gap: 10px; }
+    .metrics dt { color: #a8b6c2; font-size: 12px; }
+    .metrics dd { margin: 4px 0 0; font-weight: 650; }
+    .note { margin: 12px 0 0; }
+    @media (max-width: 760px) {
+      main { padding: 22px 14px; }
+      .layout { grid-template-columns: minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="area">Gale crater · Boxwork terrain</div>
+      <h1>Mount Sharp terrain analysis</h1>
+      <p class="muted intro">Slope from the USGS elevation model and a reference transect between two Curiosity workspaces.</p>
+    </header>
+    <p id="status" role="status">Loading prepared terrain data…</p>
+    <div id="analysis" class="layout" hidden>
+      <figure class="panel">
+        <div class="map-header">
+          <h2>Slope map</h2>
+          <label><input id="slope-toggle" type="checkbox" checked> Show slope</label>
+        </div>
+        <div id="map" class="raster">
+          <img id="slope-image" alt="Color-coded slopes across the study area">
+          <canvas id="transect" role="img" aria-label="Reference transect and two Curiosity waypoints"></canvas>
+          <span class="north">↑ N</span>
+        </div>
+        <ul id="legend" class="legend" aria-label="Slope in degrees"></ul>
+        <figcaption>Slope in degrees. Dark background marks cells without a slope estimate. <a id="dem-source">USGS elevation model</a></figcaption>
+      </figure>
+      <div class="side">
+        <section class="panel" aria-labelledby="sites-heading">
+          <h2 id="sites-heading">Curiosity workspaces</h2>
+          <div id="sites" class="sites"></div>
+          <p id="site-detail" class="muted" aria-live="polite"></p>
+          <a id="site-source" class="muted">NASA observation</a>
+        </section>
+        <section class="panel" aria-labelledby="profile-heading">
+          <h2 id="profile-heading">Elevation profile</h2>
+          <canvas id="profile" class="chart" role="img" aria-label="Sampled elevation along the reference transect"></canvas>
+          <dl id="metrics" class="metrics"></dl>
+          <p class="muted note">Straight reference transect. Heights come from the DEM at each sample.</p>
+        </section>
+      </div>
+    </div>
+    <p id="credits" class="muted"></p>
+  </main>
+  <script type="module">
+    const byId = (id) => document.getElementById(id);
+    const meters = (value) => value === null ? "—" : value.toFixed(2) + " m";
+
+    function fitCanvas(canvas) {
+      const { width, height } = canvas.getBoundingClientRect();
+      const pixelRatio = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * pixelRatio);
+      canvas.height = Math.round(height * pixelRatio);
+      const context = canvas.getContext("2d");
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      return { context, width, height };
+    }
+
+    function drawTransect(dataset, selected) {
+      const { context, width, height } = fitCanvas(byId("transect"));
+      const { west, south, east, north } = dataset.slope.bounds_mars_degrees;
+      const points = dataset.sites.map(({ longitude, latitude }) => [
+        width * (longitude - west) / (east - west),
+        height * (north - latitude) / (north - south),
+      ]);
+      context.strokeStyle = "#fff8ee";
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(...points[0]);
+      context.lineTo(...points[1]);
+      context.stroke();
+      points.forEach(([x, y], index) => {
+        context.beginPath();
+        context.arc(x, y, selected === index ? 6 : 4, 0, 2 * Math.PI);
+        context.fillStyle = selected === index ? "#ffb28a" : "#fff8ee";
+        context.fill();
+        context.strokeStyle = "#192630";
+        context.stroke();
+      });
+    }
+
+    function drawProfile({ samples, distance_m: distance }) {
+      const { context, width, height } = fitCanvas(byId("profile"));
+      const heights = samples.map(({ elevation_m }) => elevation_m).filter((value) => value !== null);
+      if (!heights.length) return;
+      const bottom = height - 28;
+      const left = 62;
+      const right = width - 20;
+      const lowest = Math.min(...heights);
+      const base = Math.max(Math.max(...heights) - lowest, 1);
+      const y = (elevation) => bottom - (elevation - lowest) / base * (bottom - 20);
+      const x = (length) => left + length / distance * (right - left);
+      context.font = "11px system-ui";
+      context.fillStyle = "#b6c3cd";
+      context.strokeStyle = "#425462";
+      for (const level of [lowest + base, lowest + base / 2, lowest]) {
+        context.beginPath();
+        context.moveTo(left, y(level));
+        context.lineTo(right, y(level));
+        context.stroke();
+        context.fillText(level.toFixed(1) + " m", 0, y(level) + 4);
+      }
+      context.fillText("0 m", left, bottom + 18);
+      context.textAlign = "right";
+      context.fillText(meters(distance), right, bottom + 18);
+      context.strokeStyle = "#ffb28a";
+      context.lineWidth = 2.5;
+      context.beginPath();
+      let continueLine = false;
+      for (const sample of samples) {
+        if (sample.elevation_m === null) {
+          continueLine = false;
+          continue;
+        }
+        const point = [x(sample.distance_m), y(sample.elevation_m)];
+        if (continueLine) context.lineTo(...point);
+        else context.moveTo(...point);
+        continueLine = true;
+      }
+      context.stroke();
+    }
+
+    async function showAnalysis() {
+      const response = await fetch("./analysis");
+      if (!response.ok) throw new Error("Terrain data are unavailable. Run scripts/build_boxwork_layers.py.");
+      const data = await response.json();
+      const image = byId("slope-image");
+      image.addEventListener("error", () => {
+        byId("status").hidden = false;
+        byId("status").textContent = "The slope image could not be loaded.";
+      });
+      image.src = "./slope.png";
+      byId("slope-toggle").onchange = (event) => { image.hidden = !event.target.checked; };
+      byId("map").style.aspectRatio = data.slope.shape.width + "/" + data.slope.shape.height;
+      byId("dem-source").href = data.dem_source;
+      byId("credits").textContent = "Elevation model · " + data.dem_credit + " | Curiosity waypoints · " + data.waypoint_credit;
+
+      for (const entry of data.slope.legend) {
+        const item = document.createElement("li");
+        const swatch = document.createElement("i");
+        swatch.style.backgroundColor = entry.color;
+        item.append(swatch, entry.label);
+        byId("legend").append(item);
+      }
+      const { distance_m, ascent_m, descent_m } = data.profile;
+      for (const [name, value] of [["Distance", distance_m], ["Ascent", ascent_m], ["Descent", descent_m]]) {
+        const item = document.createElement("div");
+        const term = document.createElement("dt");
+        const definition = document.createElement("dd");
+        term.textContent = name;
+        definition.textContent = meters(value);
+        item.append(term, definition);
+        byId("metrics").append(item);
+      }
+      let selected = 0;
+      const buttons = data.sites.map((site, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = site.name;
+        button.onclick = () => selectSite(index);
+        byId("sites").append(button);
+        return button;
+      });
+      function selectSite(index) {
+        selected = index;
+        buttons.forEach((button, i) => button.setAttribute("aria-pressed", String(i === index)));
+        const site = data.sites[index];
+        byId("site-detail").textContent = "Rover reference waypoint · sol " + site.waypoint_sol
+          + " · " + site.landform + " · Sample: " + site.reported_sample_minerals.toLowerCase();
+        byId("site-source").href = site.science_source;
+        drawTransect(data, selected);
+      }
+      byId("analysis").hidden = false;
+      byId("status").hidden = true;
+      selectSite(0);
+      const resize = new ResizeObserver(() => {
+        drawTransect(data, selected);
+        drawProfile(data.profile);
+      });
+      resize.observe(byId("map"));
+      resize.observe(byId("profile"));
+    }
+    showAnalysis().catch((error) => { byId("status").textContent = error.message; });
+  </script>
+</body>
+</html>

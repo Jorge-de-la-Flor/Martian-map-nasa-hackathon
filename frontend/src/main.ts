@@ -3,9 +3,10 @@ import "./style.css";
 
 import {
   BoundingSphere,Cartesian2, Cartesian3, Cartographic, Cesium3DTileset, Color, ConstantPositionProperty,
-  ConstantProperty, Ellipsoid, EllipsoidGeodesic, HeadingPitchRange, HeightReference, Ion,
+  ConstantProperty, Ellipsoid, EllipsoidGeodesic, GeographicTilingScheme, HeadingPitchRange, HeightReference,
+  ImageryLayer, Ion, UrlTemplateImageryProvider,
   Math as CesiumMath, PinBuilder, PolylineDashMaterialProperty,PolylineGlowMaterialProperty, Rectangle, ScreenSpaceEventHandler,
-  ScreenSpaceEventType, VerticalOrigin, Viewer,
+  ScreenSpaceEventType, VerticalOrigin, Viewer, HorizontalOrigin, type Entity, NearFarScalar, DistanceDisplayCondition,
 } from "cesium";
 import { HABITAT, MISSIONS, STUDY_ZONE, isInsideZone, type Coordinate, type Mission } from "./missions";
 import {
@@ -19,6 +20,12 @@ Ellipsoid.default = Ellipsoid.MARS;
 Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN;
 
 const CESIUM_MARS_ASSET_ID = 3644333;
+// Elementos de la zona de exploración: al alejar la cámara (> 60 km) se ocultan y solo queda el hábitat
+const NEAR_ZONE_ONLY = new DistanceDisplayCondition(0, 60000);
+let sampleSitesVisible = false; // capa de sitios de muestreo (se declara arriba para usarla en selectMission)
+const sampleSiteEntities: Entity[] = [];
+const sampleSiteDots: Entity[] = [];
+let marsTileset: Cesium3DTileset | null = null; // superficie 3D (para drapear capas como la de pendientes)
 
 // Vista de la región de estudio: cráter Gale con Mount Sharp al centro
 function flyToGale(duration = 3): void {
@@ -131,6 +138,18 @@ app.innerHTML = `
           <canvas id="profile-chart" width="620" height="300" role="img" aria-label="Elevation profile of the planned route"></canvas>
           <p id="profile-caption" class="muted"></p>
           <p class="profile-legend">Line color = slope: <span style="color:#7fb3d5">&lt;5°</span> · <span style="color:#65a39e">5–10°</span> · <span style="color:#e8bb69">10–20°</span> · <span style="color:#e46549">≥20°</span></p>
+        </div>
+        <div class="layers-card">
+          <p class="eyebrow">DATA LAYERS</p>
+          <label class="layer-toggle"><input type="checkbox" id="slope-toggle" /> Slope map · USGS DEM 1 m</label>
+          <ul id="slope-legend" class="slope-legend" hidden>
+            <li><span style="background:#7fb3d5"></span>0–5°</li>
+            <li><span style="background:#65a39e"></span>5–10°</li>
+            <li><span style="background:#e8bb69"></span>10–20°</li>
+            <li><span style="background:#e46549"></span>≥20°</li>
+          </ul>
+          <p id="slope-note" class="layer-note"></p>
+          <label class="layer-toggle layer-toggle-next"><input type="checkbox" id="sites-toggle" /> Curiosity sample sites · minerals</label>
         </div>
         <div id="site-photo" class="site-photo" hidden>
           <button id="site-photo-close" class="site-photo-close" aria-label="Close">×</button>
@@ -268,6 +287,7 @@ async function loadMars(): Promise<void> {
   try {
     const mars = await Cesium3DTileset.fromIonAssetId(CESIUM_MARS_ASSET_ID, { enableCollision: true });
     viewer.scene.primitives.add(mars);
+    marsTileset = mars;
     mapCaption.textContent = "Cesium Mars · NASA / USGS Astrogeology";
     flyToGale(4);
   } catch (error) {
@@ -301,6 +321,7 @@ const targetEntity = viewer.entities.add({
   position: Cartesian3.fromDegrees(0, 0),
   billboard: {
     image: new PinBuilder().fromColor(Color.fromCssColorString("#f08a4b"), 48),
+    distanceDisplayCondition: NEAR_ZONE_ONLY,
     verticalOrigin: VerticalOrigin.BOTTOM,
     heightReference: HeightReference.CLAMP_TO_GROUND,
     disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -317,6 +338,7 @@ const targetPhotoEntity = viewer.entities.add({
     height: 100,
     verticalOrigin: VerticalOrigin.BOTTOM,
     pixelOffset: new Cartesian2(0, -56), // encima del pin
+    distanceDisplayCondition: NEAR_ZONE_ONLY,
     heightReference: HeightReference.CLAMP_TO_GROUND,
     disableDepthTestDistance: Number.POSITIVE_INFINITY,
   },
@@ -328,6 +350,7 @@ const targetPhotoEntity = viewer.entities.add({
     backgroundColor: Color.fromCssColorString("#0c121a").withAlpha(0.85),
     verticalOrigin: VerticalOrigin.BOTTOM,
     pixelOffset: new Cartesian2(0, -162), // encima de la foto
+    distanceDisplayCondition: NEAR_ZONE_ONLY,
     heightReference: HeightReference.CLAMP_TO_GROUND,
     disableDepthTestDistance: Number.POSITIVE_INFINITY,
   },
@@ -388,7 +411,8 @@ function selectMission(mission: Mission): void {
   loadFramedPhoto(mission.photo.src)
     .then((canvas) => {
       targetPhotoEntity.billboard!.image = new ConstantProperty(canvas);
-      targetPhotoEntity.show = true;
+      targetPhotoEntity.show = !sampleSitesVisible;
+      refreshSampleSiteOffsets();
     })
     .catch((error) => console.error("Could not load site photo:", error));
   targetCartesian = Cartesian3.fromDegrees(longitude, latitude);
@@ -489,6 +513,30 @@ const zoneBorder = viewer.entities.add({
   },
 });
 
+// Cartel de ayuda en el borde oeste de la zona, POR FUERA (no tapa los objetivos de adentro)
+function zoneHintPosition(): Cartesian3 {
+  const { west, south, north } = STUDY_ZONE;
+  return Cartesian3.fromDegrees(west, (south + north) / 2);
+}
+const zoneHint = viewer.entities.add({
+  name: "Explorable area hint",
+  position: zoneHintPosition(),
+  label: {
+    text: "EXPLORABLE AREA · USGS 1 m terrain\nClick inside the blue zone ▶\nto place the astronaut",
+    font: "bold 13px sans-serif",
+    fillColor: Color.fromCssColorString("#bfe3f7"),
+    showBackground: true,
+    backgroundColor: Color.fromCssColorString("#0c121a").withAlpha(0.85),
+    backgroundPadding: new Cartesian2(10, 6),
+    horizontalOrigin: HorizontalOrigin.RIGHT, // el cartel queda a la izquierda del borde
+    verticalOrigin: VerticalOrigin.CENTER,
+    pixelOffset: new Cartesian2(-10, 0),
+    distanceDisplayCondition: NEAR_ZONE_ONLY,
+    heightReference: HeightReference.CLAMP_TO_GROUND,
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  },
+});
+
 // Pedir al backend el área exacta con datos y ajustar la zona
 async function loadCoverage(): Promise<void> {
   try {
@@ -498,6 +546,7 @@ async function loadCoverage(): Promise<void> {
     Object.assign(STUDY_ZONE, { west: c.west, south: c.south, east: c.east, north: c.north });
     zoneFill.rectangle!.coordinates = new ConstantProperty(Rectangle.fromDegrees(c.west, c.south, c.east, c.north));
     zoneBorder.polyline!.positions = new ConstantProperty(zoneOutline());
+    zoneHint.position = new ConstantPositionProperty(zoneHintPosition());
   } catch (error) {
     console.warn("Coverage unavailable, using the built-in study zone:", error);
   }
@@ -975,5 +1024,262 @@ function showElevationProfile(samples: ElevationSample[], metrics: RouteMetrics)
     `↑ ${Math.round(metrics.ascent_m)} m · ↓ ${Math.round(metrics.descent_m)} m · ` +
     `max slope ${metrics.max_slope_deg.toFixed(0)}° · mean ${metrics.mean_slope_deg.toFixed(1)}°`;
 }
+
+// ---------- Capa de pendientes (mapa de calor) ----------
+// Imagen generada por scripts/build_boxwork_layers.py y servida por /api/mission/boxwork (trabajo de Steven).
+// Se "drapea" sobre la superficie 3D de Cesium Mars.
+let slopeLayer: ImageryLayer | null = null;
+
+async function setSlopeLayer(visible: boolean): Promise<void> {
+  const toggle = document.querySelector<HTMLInputElement>("#slope-toggle")!;
+  const legend = document.querySelector<HTMLUListElement>("#slope-legend")!;
+  const note = document.querySelector<HTMLParagraphElement>("#slope-note")!;
+
+  if (!visible) {
+    if (slopeLayer) slopeLayer.show = false;
+    legend.hidden = true;
+    return;
+  }
+
+  if (!slopeLayer) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/mission/boxwork/analysis`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const analysis = (await response.json()) as {
+        dem_credit: string;
+        slope: { bounds_mars_degrees: { west: number; south: number; east: number; north: number } };
+      };
+      const b = analysis.slope.bounds_mars_degrees;
+      const rectangle = Rectangle.fromDegrees(b.west, b.south, b.east, b.north);
+      const provider = new UrlTemplateImageryProvider({
+        url: `${API_BASE_URL}/api/mission/boxwork/slope.png`,
+        rectangle,
+        credit: analysis.dem_credit,
+        tilingScheme: new GeographicTilingScheme({
+          rectangle,
+          ellipsoid: Ellipsoid.MARS,
+          numberOfLevelZeroTilesX: 1,
+          numberOfLevelZeroTilesY: 1,
+        }),
+        // Nota de Steven: el draper de 3D Tiles de Cesium 1.147 trata maximumLevel como exclusivo
+        maximumLevel: marsTileset ? 1 : 0,
+      });
+      slopeLayer = new ImageryLayer(provider, { rectangle, alpha: 0.65 });
+      (marsTileset?.imageryLayers ?? viewer.imageryLayers).add(slopeLayer);
+      note.textContent = "";
+    } catch (error) {
+      console.warn("Slope layer unavailable:", error);
+      toggle.checked = false;
+      note.textContent = "Slope map unavailable · run scripts/build_boxwork_layers.py";
+      return;
+    }
+  }
+
+  slopeLayer.show = true;
+  legend.hidden = false;
+}
+
+document.querySelector<HTMLInputElement>("#slope-toggle")!
+  .addEventListener("change", (event) => void setSlopeLayer((event.target as HTMLInputElement).checked));
+
+// ---------- Sitios de muestreo de Curiosity (capa informativa de minerales) ----------
+// Datos: data/mount-sharp-boxwork-sites.json (Steven) + blogs de la misión Curiosity (NASA/JPL-Caltech).
+// Cada sitio muestra una tarjeta flotante con su foto real y una flechita que apunta al lugar.
+interface SampleSite {
+  name: string;
+  landform: string;
+  minerals: string;
+  photoNote: string;
+  longitude: number;
+  latitude: number;
+  photo: string;
+  color: string;
+  side: "left" | "right" | "center"; // hacia dónde se abre la tarjeta (Sajama y Valle están a ~20 m)
+}
+
+const SAMPLE_SITES: SampleSite[] = [
+  {
+    name: "Valle de la Luna", landform: "Hollow", minerals: "Carbonate minerals",
+    photoNote: "Mastcam · sol 4693",
+    longitude: 137.3810353, latitude: -4.80783916,
+    photo: "/missions/valle-de-la-luna.jpg", color: "#e8bb69", side: "left",
+  },
+  {
+    name: "Nevado Sajama", landform: "Ridge", minerals: "Clay minerals",
+    photoNote: "Navcam · sol 4709",
+    longitude: 137.3810041, latitude: -4.80800755,
+    photo: "/missions/nevado-sajama.jpg", color: "#65a39e", side: "right",
+  },
+  {
+    name: "Nazca", landform: "Block", minerals: "Disc-shaped crystals",
+    photoNote: "MAHLI · sol 5048",
+    longitude: 137.3876111, latitude: -4.8246694,
+    photo: "/missions/nazca.jpg", color: "#f08a4b", side: "center",
+  },
+];
+
+function loadImage(src: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => { console.warn("Sample site photo missing:", src); resolve(null); };
+    img.src = src;
+  });
+}
+
+const CARD_W = 210, CARD_HEADER = 42, CARD_PHOTO = 118, CARD_ARROW = 14;
+const CARD_H = CARD_HEADER + CARD_PHOTO + CARD_ARROW;
+
+function drawSiteCard(site: SampleSite, img: HTMLImageElement | null): HTMLCanvasElement {
+  const s = 2; // dibujar al doble para que se vea nítido
+  const canvas = document.createElement("canvas");
+  canvas.width = CARD_W * s;
+  canvas.height = CARD_H * s;
+  const ctx = canvas.getContext("2d")!;
+  ctx.scale(s, s);
+  const bodyH = CARD_HEADER + CARD_PHOTO;
+
+  // Flechita apuntando al sitio
+  const tipX = site.side === "left" ? CARD_W - 1 : site.side === "right" ? 1 : CARD_W / 2;
+  const baseA = site.side === "left" ? CARD_W - 26 : site.side === "right" ? 1 : CARD_W / 2 - 11;
+  const baseB = site.side === "left" ? CARD_W - 1 : site.side === "right" ? 26 : CARD_W / 2 + 11;
+  ctx.fillStyle = site.color;
+  ctx.beginPath();
+  ctx.moveTo(baseA, bodyH - 1);
+  ctx.lineTo(baseB, bodyH - 1);
+  ctx.lineTo(tipX, CARD_H);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cuerpo de la tarjeta
+  ctx.fillStyle = "rgba(12, 18, 26, 0.94)";
+  ctx.strokeStyle = site.color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(1, 1, CARD_W - 2, bodyH - 2, 8);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText(site.name, 10, 18);
+  ctx.fillStyle = site.color;
+  ctx.font = "bold 11px sans-serif";
+  ctx.fillText(`${site.landform} · ${site.minerals}`, 10, 34);
+
+  // Foto real del sitio
+  const px = 6, py = CARD_HEADER, pw = CARD_W - 12, ph = CARD_PHOTO - 22;
+  if (img) {
+    const scale = Math.max(pw / img.width, ph / img.height);
+    const sw = pw / scale, sh = ph / scale;
+    ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, px, py, pw, ph);
+  } else {
+    ctx.fillStyle = "#1b2632";
+    ctx.fillRect(px, py, pw, ph);
+    ctx.fillStyle = "#8a99a6";
+    ctx.font = "11px sans-serif";
+    ctx.fillText("Photo not downloaded yet", px + 10, py + ph / 2);
+  }
+  ctx.fillStyle = "#9aabb8";
+  const footer = `${site.photoNote} · NASA/JPL-Caltech`;
+  let size = 10;
+  do { ctx.font = `${size}px sans-serif`; size -= 0.5; } while (ctx.measureText(footer).width > CARD_W - 20 && size > 7);
+  ctx.fillText(footer, 10, py + ph + 15);
+  return canvas;
+}
+
+let sampleSitesBuilt = false;
+
+async function buildSampleSites(): Promise<void> {
+  if (sampleSitesBuilt) return;
+  sampleSitesBuilt = true;
+  for (const site of SAMPLE_SITES) {
+    const img = await loadImage(site.photo);
+    const position = Cartesian3.fromDegrees(site.longitude, site.latitude);
+    // Punto en el suelo: entidad aparte (un punto pegado al terreno usa internamente un billboard
+    // y, si comparte entidad con la tarjeta, la reemplaza)
+    sampleSiteDots.push(viewer.entities.add({
+      name: `${site.name} · ${site.minerals}`,
+      show: sampleSitesVisible,
+      position,
+      point: {
+        pixelSize: 10,
+        color: Color.fromCssColorString(site.color),
+        outlineColor: Color.WHITE,
+        outlineWidth: 2,
+        heightReference: HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }));
+    const entity = viewer.entities.add({
+      name: `${site.name} · ${site.minerals}`,
+      show: sampleSitesVisible,
+      position,
+      billboard: {
+        image: drawSiteCard(site, img),
+        width: CARD_W,
+        height: CARD_H,
+        verticalOrigin: VerticalOrigin.BOTTOM,
+        horizontalOrigin: site.side === "left" ? HorizontalOrigin.RIGHT
+          : site.side === "right" ? HorizontalOrigin.LEFT : HorizontalOrigin.CENTER,
+        // Al alejar la cámara las tarjetas se achican y, muy lejos, se ocultan (quedan solo los puntos)
+        scaleByDistance: new NearFarScalar(1200, 1.0, 7000, 0.45),
+        distanceDisplayCondition: new DistanceDisplayCondition(0, 9000),
+        heightReference: HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    sampleSiteEntities.push(entity);
+  }
+  refreshSampleSiteOffsets();
+}
+
+// Si el sitio es el objetivo de la misión, la tarjeta sube para no tapar el pin naranja
+function refreshSampleSiteOffsets(): void {
+  sampleSiteEntities.forEach((entity, i) => {
+    const site = SAMPLE_SITES[i];
+    const isTarget = currentMission !== null
+      && Math.abs(currentMission.target.longitude - site.longitude) < 1e-6
+      && Math.abs(currentMission.target.latitude - site.latitude) < 1e-6;
+    entity.billboard!.pixelOffset = new ConstantProperty(new Cartesian2(0, isTarget ? -50 : -6));
+  });
+}
+
+async function setSampleSites(visible: boolean): Promise<void> {
+  sampleSitesVisible = visible;
+  // Las tarjetas reemplazan a la miniatura del objetivo mientras la capa está activa
+  if (visible) targetPhotoEntity.show = false;
+  else if (currentMission) targetPhotoEntity.show = true;
+  await buildSampleSites();
+  [...sampleSiteEntities, ...sampleSiteDots].forEach((entity) => { entity.show = visible; });
+  refreshSampleSiteOffsets();
+}
+
+document.querySelector<HTMLInputElement>("#sites-toggle")!
+  .addEventListener("change", (event) => void setSampleSites((event.target as HTMLInputElement).checked));
+
+// ---------- Tarjeta pequeña de la base (pin "H") ----------
+// Foto: PIA16109, Hazcam de Curiosity mirando su lugar de aterrizaje (Bradbury Landing), NASA/JPL-Caltech
+const HABITAT_CARD: SampleSite = {
+  name: "Habitat · Bradbury Landing", landform: "Base", minerals: "Curiosity landing site (2012)",
+  photoNote: "Hazcam · PIA16109",
+  longitude: HABITAT.longitude, latitude: HABITAT.latitude,
+  photo: "/missions/habitat.jpg", color: "#4fa3d9", side: "center",
+};
+void loadImage(HABITAT_CARD.photo).then((img) => {
+  viewer.entities.add({
+    name: HABITAT_CARD.name,
+    position: Cartesian3.fromDegrees(HABITAT.longitude, HABITAT.latitude),
+    billboard: {
+      image: drawSiteCard(HABITAT_CARD, img),
+      width: CARD_W * 0.7, // más pequeña que las de los sitios
+      height: CARD_H * 0.7,
+      verticalOrigin: VerticalOrigin.BOTTOM,
+      pixelOffset: new Cartesian2(0, -46), // encima del pin "H"
+      heightReference: HeightReference.CLAMP_TO_GROUND,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+});
 
 void checkApi();

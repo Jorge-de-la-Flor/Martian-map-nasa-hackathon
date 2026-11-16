@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.routes.boxwork import router as boxwork_router
 from api.routes.health import router as health_router
 from api.routes.mission import router as mission_router
 from core.config import get_settings
@@ -23,6 +24,7 @@ app.add_middleware(
 
 app.include_router(health_router, prefix="/api")
 app.include_router(mission_router, prefix="/api")
+app.include_router(boxwork_router, prefix="/api")
 
 
 @app.get("/", tags=["root"])
